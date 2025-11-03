@@ -4,9 +4,11 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, CallbackQueryHandler
 
-from Handler.handlers import start_command, help_command, create_new_board_command, boards_command, cancel_add_item, \
+from Handler.handlers import start_command, help_command
+
+from Handler.database_handler import create_new_board_command, boards_command, cancel_add_item, \
     add_item_conservation, GET_TITLE, get_title, SELECT_BOARD, inline_board_selection, show_command, view_command, \
-    remove_command, move_command, stats_command
+    remove_command, move_command, stats_command, inline_board_item
 
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -37,6 +39,8 @@ def main():
     application.add_handler(CommandHandler("remove", remove_command))
     application.add_handler(CommandHandler("move", move_command))
     application.add_handler(CommandHandler("stats", stats_command))
+
+    application.add_handler(CallbackQueryHandler(inline_board_item))
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
