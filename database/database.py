@@ -1,7 +1,7 @@
 import datetime
 import logging
 
-from sqlalchemy import Integer, String, DateTime, Text, Boolean, create_engine
+from sqlalchemy import Integer, String, DateTime, Text, Boolean, create_engine, BigInteger
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from sqlalchemy.sql.schema import Column, ForeignKey
 
@@ -45,14 +45,15 @@ class Board(Base):
 class Item(Base):
     __tablename__ = 'items'
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('users.id'), index=True)
-    board_id = Column(Integer, ForeignKey('boards.id'), index=True)
-
-    title = Column(String, nullable=False)
-    content_type = Column(String, nullable=False)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey('users.id'))
+    board_id = Column(Integer, ForeignKey('boards.id'))
+    title = Column(String(255), nullable=False)
+    content_type = Column(String(50), nullable=False)
     content_data = Column(Text)
-    is_read = Column(Boolean, default=False)
+    file_path = Column(String(500))
+    file_size = Column(Integer)
+    encrypted = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
 
     user = relationship("User", back_populates="items")

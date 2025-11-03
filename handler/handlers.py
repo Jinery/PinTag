@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import CallbackContext
 
-from Database.database import get_db, User, create_default_board
+from database.database import get_db, User, create_default_board
 
 logger = logging.getLogger(__name__)
 

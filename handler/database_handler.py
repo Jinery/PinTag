@@ -1,4 +1,7 @@
 import logging
+import os
+from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
@@ -6,11 +9,15 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import CallbackContext, ConversationHandler
 
-from Database.database import get_db, Board, Item
+from database.database import get_db, Board, Item
+from files.encryption_manager import encryption_manager
+from files.file_manager import file_manager
 from utils.item_searcher import find_item_by_title, find_items_by_keyword, find_item_by_id
 
 logger = logging.getLogger(__name__)
 GET_TITLE, SELECT_BOARD = range(2)
+
+ALL_FILE_TYPES = ['photo', 'document', 'video']
 
 def extract_content_info(message):
     content_type = 'text'
@@ -91,9 +98,57 @@ async def boards_command(update: Update, context: CallbackContext) -> None:
         db.close()
 
 
+async def rename_board_command(update: Update, context: CallbackContext) -> None:
+    if len(context.args) < 2:
+        await update.message.edit_text(
+            "Использовануй: /renameboard <старое_название> <новое_название> [эмодзи]\n"
+            "Пример: /renameboard Стараядоска Новаядоска 🎯"
+        )
+
+    user_id = update.effective_user.id
+    old_name = context.args[0]
+    new_name = context.args[1]
+    new_emoji = context.args[2] if len(context.args) > 2 else None
+
+    db = next(get_db())
+    try:
+        board = db.query(Board).filter(
+            Board.user_id == user_id,
+            Board.name == old_name,
+        ).first()
+
+        if not board:
+            await update.message.reply_text(f"❌ Доска с названием *{old_name}* не найдена.",
+                                          parse_mode=ParseMode.MARKDOWN)
+            return
+
+        existing_board = db.query(Board).filter(
+            Board.user_id == user_id,
+            Board.name == new_name
+        ).first()
+
+        if existing_board and existing_board.id != board.id:
+            await update.message.reply_text(f"❌ Доска с названием *{new_name}* уже существует.",
+                                            parse_mode=ParseMode.MARKDOWN)
+            return
+
+        old_emoji = board.emoji
+        board.name = new_name
+        board.emoji = new_emoji if new_emoji else old_emoji
+        db.commit()
+
+        await update.message.edit_text(f"✅ Доска *{old_emoji} {old_name}* переименована в *{new_emoji} {new_name}*!",
+                                       parse_mode=ParseMode.MARKDOWN)
+    except SQLAlchemyError as sqlex:
+        logger.error(f"SQLAlchemy Error on /renameboard command: {sqlex}")
+        await update.message.reply_text("❌ Ошибка базы данных при переименовании доски.")
+    finally:
+        db.close()
+
+
 async def create_new_board_command(update: Update, context: CallbackContext) -> None:
     if not context.args:
-        await update.message.reply_text("Еблан? Укажи название доски. Ну хотя-бы: /createboard Python 🐍")
+        await update.message.reply_text("Укажи название доски. Например: /createboard Python 🐍")
         return
 
     user_id = update.effective_user.id
@@ -215,28 +270,55 @@ async def view_command(update: Update, context: CallbackContext) -> None:
             [InlineKeyboardButton(f"🗑 Удалить", callback_data=f"remove_item:{item.id}")],
         ])
 
-        if item.content_type == 'link':
-            await update.message.reply_text(f"*{item.title}* (из доски *{item.board.name}*):\n" + item.content_data,
-                                            parse_mode=ParseMode.MARKDOWN,
-                                            reply_markup=reply_markup)
-        elif item.content_type in ('photo', 'document', 'video'):
-            if item.content_type == 'photo':
-                await update.message.reply_photo(item.content_data, caption=f"*{item.title}* (из доски *{item.board.name}*):",
-                                                 parse_mode=ParseMode.MARKDOWN,
-                                                 reply_markup=reply_markup)
-            elif item.content_type == 'document':
-                await update.message.reply_document(item.content_data, caption=f"*{item.title}* (из доски *{item.board.name}*):",
-                                                    parse_mode=ParseMode.MARKDOWN,
-                                                    reply_markup=reply_markup)
-            elif item.content_type == 'video':
-                await update.message.reply_video(item.content_data, caption=f"*{item.title}* (из доски *{item.board.name}*):",
-                                                 parse_mode=ParseMode.MARKDOWN,
-                                                 reply_markup=reply_markup)
-        else:
-            await update.message.reply_text(f"*{item.title}* (из доски *{item.board.name}*):" + item.content_data,
-                                            parse_mode=ParseMode.MARKDOWN,
-                                            reply_markup=reply_markup)
+        caption = f"*{item.title}* (из доски *{item.board.name}*):\n"
 
+        if item.content_type in ('photo', 'document', 'video'):
+            caption = f"*{item.title}* (из доски *{item.board.name}*):"
+
+            try:
+                if item.content_data:
+                    try:
+                        if item.content_type == 'photo':
+                            await update.message.reply_photo(item.content_data, caption=caption,
+                                                             parse_mode=ParseMode.MARKDOWN,
+                                                             reply_markup=reply_markup)
+                        elif item.content_type == 'document':
+                            await update.message.reply_document(item.content_data, caption=caption,
+                                                                parse_mode=ParseMode.MARKDOWN,
+                                                                reply_markup=reply_markup)
+                        elif item.content_type == 'video':
+                            await update.message.reply_video(item.content_data, caption=caption,
+                                                             parse_mode=ParseMode.MARKDOWN,
+                                                             reply_markup=reply_markup)
+                        return
+                    except Exception as e:
+                        logger.warning(f"File_id failed, trying local file: {e}")
+
+                if item.file_path and os.path.exists(item.file_path):
+                    file_data = file_manager.get_file(item.file_path)
+
+                    if getattr(item, 'encrypted', False):
+                        file_data = encryption_manager.decrypt_file(file_data)
+
+                    filename = Path(item.file_path).name
+
+                    if item.content_type == 'photo':
+                        await update.message.reply_photo(file_data, caption=caption, parse_mode=ParseMode.MARKDOWN)
+                    elif item.content_type == 'document':
+                        await update.message.reply_document(file_data, caption=caption, filename=filename,
+                                                            parse_mode=ParseMode.MARKDOWN,
+                                                            reply_markup=reply_markup)
+                    elif item.content_type == 'video':
+                        await update.message.reply_video(file_data, caption=caption,
+                                                         parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+                else:
+                    await update.message.reply_text("❌ Файл не найден на сервере")
+            except Exception as e:
+                logger.error(f"Error sending {item.content_type}: {e}")
+                await update.message.reply_text(f"❌ Ошибка при отправке {item.content_type}")
+        else:
+            await update.message.reply_text(caption + item.content_data,
+                                            parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error on /view command: {sqlex}")
         await update.message.reply_text("Произошла ошибка базы данных при получении элемента.")
@@ -264,6 +346,13 @@ async def remove_command(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text(f"Элемент с названием **'{item_title}'** не найден.",
                                             parse_mode=ParseMode.MARKDOWN)
             return
+
+        if item.content_type in ['photo', 'document', 'video'] and item.file_path:
+            try:
+                file_manager.delete_file(item.file_path)
+                print(f"Removed file: {item.file_path}")
+            except Exception as e:
+                logger.error(f"Error deleting file {item.file_path}: {e}")
 
         board_name = item.board.name
         db.delete(item)
@@ -383,28 +472,55 @@ async def stats_command(update: Update, context: CallbackContext) -> None:
 
 async def add_item_conservation(update: Update, context: CallbackContext) -> int:
     message = update.message
+    user_id = update.effective_user.id
 
     content_type, data, suggested_title = extract_content_info(message)
+    print(f"📨 Received: {content_type}, data: {data}")
 
     if not data:
         await update.message.reply_text("Отправь мне ссылку, файл или медиа-контент для сохранения.")
         return ConversationHandler.END
 
+    file_path = None
+    if content_type in ALL_FILE_TYPES:
+        try:
+            file = await context.bot.get_file(data)
+            file_data = await file.download_as_bytearray()
+
+            if content_type == 'document':
+                original_filename = message.document.file_name
+            else:
+                file_extension = '.jpg' if content_type == 'photo' else '.mp4'
+                original_filename = f"{content_type}_{int(datetime.now().timestamp())}{file_extension}"
+
+            encrypted_data = encryption_manager.encrypt_file(bytes(file_data))
+            file_path = file_manager.save_file(
+                encrypted_data,
+                user_id,
+                content_type + 's',
+                original_filename,
+            )
+
+        except Exception as e:
+            logger.error(f"Error saving file: {e}")
+            await update.message.reply_text("❌ Ошибка при сохранении файла")
+            return ConversationHandler.END
+
+    is_file = content_type in ALL_FILE_TYPES
     context.user_data["temp_item"] = {
         "content_type": content_type,
         "content_data": data,
+        "file_path": file_path,
+        "file_size": file_manager.get_file_size(file_path) if file_path else 0,
+        "encrypted": True if is_file and file_path else False,
         "telegram_message_id": message.message_id,
     }
 
     await message.reply_text(
         f"✅ Отлично, я получил твой контент.\n\n"
-        f"**Шаг 1 из 2:** Придумай название для этого элемента. \n"
-        f"*(Можешь просто ответить на это сообщение, чтобы использовать название по умолчанию:)*\n"
-        f"*{suggested_title}*",
+        f"*Шаг 1 из 2:* Придумай название для этого элемента.",
         parse_mode=ParseMode.MARKDOWN,
     )
-    context.user_data["suggested_item"] = suggested_title
-
     return GET_TITLE
 
 
@@ -442,14 +558,72 @@ async def inline_board_selection(update: Update, context: CallbackContext) -> in
             context.user_data.pop("temp_item", None)
             return ConversationHandler.END
 
+
         elif action == "create_new_board":
-            await context.bot.edit_message_text(
-                chat_id=user_id,
-                message_id=query.message.message_id,
-                text="Для создания новой доски используй команду /createboard <название> <эмодзи>"
-            )
-            context.user_data.pop("temp_item", None)
-            return ConversationHandler.END
+            current_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+            board_name = f"{current_time}-Новая-доска"
+            board_emoji = "📁"
+            db = next(get_db())
+
+            try:
+                existing_board = db.query(Board).filter(
+                    Board.user_id == user_id,
+                    Board.name == board_name
+
+                ).first()
+
+                if existing_board:
+                    import random
+                    board_name = f"{current_time}-Новая-доска-{random.randint(1000, 9999)}"
+
+                new_board = Board(
+                    name=board_name,
+                    emoji=board_emoji,
+                    user_id=user_id,
+                )
+                db.add(new_board)
+                db.commit()
+
+                board_id = new_board.id
+                item_data = context.user_data["temp_item"]
+
+                new_item = Item(
+                    user_id=user_id,
+                    board_id=board_id,
+                    title=item_data["title"],
+                    content_type=item_data["content_type"],
+                    content_data=item_data["content_data"],
+                    file_path=item_data["file_path"],
+                    file_size=item_data["file_size"],
+                    encrypted=item_data["encrypted"],
+                )
+                db.add(new_item)
+                db.commit()
+
+                await context.bot.edit_message_text(
+                    chat_id=user_id,
+                    message_id=query.message.message_id,
+                    text=f"✅ Создана новая доска *{board_emoji} {board_name}* и элемент *'{item_data['title']}'* сохранен в неё!",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except SQLAlchemyError as sqlex:
+                logger.error(f"SQLAlchemy Error creating board: {sqlex}")
+                await context.bot.edit_message_text(
+                    chat_id=user_id,
+                    message_id=query.message.message_id,
+                    text="Ошибка при создании доски и сохранении элемента."
+                )
+            except Exception as e:
+                logger.error(f"Unexpected error: {e}")
+                await context.bot.edit_message_text(
+                    chat_id=user_id,
+                    message_id=query.message.message_id,
+                    text="Произошла ошибка."
+                )
+            finally:
+                db.close()
+                context.user_data.pop("temp_item", None)
+                return ConversationHandler.END
 
         elif action.startswith("board:"):
             board_id = int(action.split(":")[1])
@@ -472,8 +646,10 @@ async def inline_board_selection(update: Update, context: CallbackContext) -> in
                     title=item_data["title"],
                     content_type=item_data["content_type"],
                     content_data=item_data["content_data"],
+                    file_path=item_data["file_path"],
+                    file_size=item_data["file_size"],
+                    encrypted=item_data["encrypted"],
                 )
-
                 db.add(new_item)
                 db.commit()
 
@@ -539,6 +715,13 @@ async def inline_board_item(update: Update, context: CallbackContext) -> None:
                     parse_mode=ParseMode.MARKDOWN
                 )
                 return
+
+            if item.content_type in ['photo', 'document', 'video'] and item.file_path:
+                try:
+                    file_manager.delete_file(item.file_path)
+                    print(f"Removed file: {item.file_path}")
+                except Exception as e:
+                    logger.error(f"Error deleting file {item.file_path}: {e}")
 
             item_name = item.title
             db.delete(item)
