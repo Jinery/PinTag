@@ -316,6 +316,108 @@ async def remove_command(update: Update, context: CallbackContext) -> None:
         db.close()
 
 
+
+async def move_command(update: Update, context: CallbackContext) -> None:
+    user_id = update.effective_user.id
+
+    if len(context.args) < 2:
+        await update.message.reply_text("Укажи название элемента и доски, например: move Первая запись Первая доска")
+        return
+
+    target_board_name = context.args[-1]
+    item_title = " ".join(context.args[:-1])
+
+    db = next(get_db())
+    try:
+        item = find_item_by_title(db, user_id, item_title)
+
+        if not item:
+            await update.message.reply_text(f"Элемент с названием *{item_title}* не найден.",
+                                            parse_mode=ParseMode.MARKDOWN)
+            return
+
+        old_board_name = item.board.name
+
+        target_board = db.query(Board).filter(
+            Board.user_id == user_id,
+            func.lower(Board.name) == func.lower(target_board_name)
+        ).first()
+
+        if not target_board:
+            await update.message.reply_text(f"Доска с названием: *{target_board_name} не найдена.*",
+                                            parse_mode=ParseMode.MARKDOWN)
+            return
+
+        if item.board_id == target_board.id:
+            await update.message.reply_text(f"Элемент *{item_title}* уже находит в доске *{target_board_name}*",
+                                            parse_mode=ParseMode.MARKDOWN)
+            return
+
+        item.board_id = target_board.id
+        db.commit()
+
+        await update.message.reply_text(f"✅ Элемент *{item_title}* успешно перемещён из *{old_board_name}* в *{target_board_name}*",
+                                        parse_mode=ParseMode.MARKDOWN)
+
+    except SQLAlchemyError as sqlex:
+        logger.error(f"SQLAlchemy Error on /move command: {sqlex}")
+        await update.message.reply_text("Произошла ошибка базы данных при перемещении элемента.")
+    finally:
+        db.close()
+
+
+async def stats_command(update: Update, context: CallbackContext) -> None:
+    user_id = update.effective_user.id
+    db = next(get_db())
+
+    try:
+        board_count = db.query(Board).filter(Board.user_id == user_id).count()
+        total_items = db.query(Item).filter(Item.user_id == user_id).count()
+
+        item_stats = db.query(
+            Item.content_type,
+            func.count(Item.id),
+        ).filter(
+            Item.user_id == user_id,
+        ).group_by(Item.content_type).all()
+
+        if total_items == 0:
+            message = "📊 *Твоя Статистика PinTag:*\n\n" \
+                      "У тебя пока нет сохраненных элементов."
+        else:
+            type_mapping = {
+                'link': '🔗 Ссылки',
+                'photo': '🖼️ Фото',
+                'document': '📄 Документы',
+                'video': '📹 Видео',
+                'text': '📝 Текст',
+                'audio': '🔊 Аудио',
+            }
+
+            stats_list = []
+            for item_type, count in item_stats:
+                display_name = type_mapping.get(item_type, item_type.capitalize())
+                stats_list.append(f"    • {count}: {display_name}")
+
+            stats_text = "\n".join(stats_list)
+
+            message = (
+                f"📊 *Твоя Статистика PinTag:*\n\n"
+                f"🔸 *Доски:* {board_count}\n"
+                f"🔸 *Всего элементов:* {total_items}\n\n"
+                f"*Разбивка по типу контента:*\n"
+                f"{stats_text}"
+            )
+
+            await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
+    except SQLAlchemyError as sqlex:
+        logger.error(f"SQLAlchemy Error on /stats command: {sqlex}")
+        await update.message.reply_text("Ошибка базы данных при обработке статистики")
+    finally:
+        db.close()
+
+
 async def add_item_conservation(update: Update, context: CallbackContext) -> int:
     message = update.message
 
