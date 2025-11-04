@@ -1,29 +1,38 @@
-from sqlalchemy import func
-
+from sqlalchemy import func, select
 from database.database import Item
 
 
-def find_item_by_title(db, user_id: int, title: str) -> Item:
-    return db.query(Item).filter(
-        Item.user_id == user_id,
-        Item.title == title
-    ).first()
-
-def find_item_by_id(db, user_id: int, item_id: int) -> Item:
-    return db.query(Item).filter(
-        Item.user_id == user_id,
-        Item.id == item_id,
-    ).first()
+async def find_item_by_title(db, user_id: int, title: str) -> Item:
+    result = await db.execute(
+        select(Item).filter(
+            Item.user_id == user_id,
+            Item.title == title
+        )
+    )
+    return result.scalar_one_or_none()
 
 
-def find_items_by_keyword(db, user_id: int, keyword: str):
+async def find_item_by_id(db, user_id: int, item_id: int) -> Item:
+    result = await db.execute(
+        select(Item).filter(
+            Item.user_id == user_id,
+            Item.id == item_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def find_items_by_keyword(db, user_id: int, keyword: str):
     search_pattern = f"%{keyword}%"
     print(f"Searching for: '{keyword}' -> pattern: '{search_pattern}'")
 
-    items = db.query(Item).filter(
-        Item.user_id == user_id,
-        func.lower(Item.title).like(func.lower(search_pattern))
-    ).order_by(Item.title).all()
+    result = await db.execute(
+        select(Item).filter(
+            Item.user_id == user_id,
+            func.lower(Item.title).like(func.lower(search_pattern))
+        ).order_by(Item.title)
+    )
+    items = result.scalars().all()
 
     print(f"📋 Found {len(items)} items")
     for item in items:

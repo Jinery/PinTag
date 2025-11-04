@@ -1,13 +1,14 @@
 import datetime
 import logging
 
-from sqlalchemy import Integer, String, DateTime, Text, Boolean, create_engine, BigInteger
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy import Integer, String, DateTime, Text, Boolean, BigInteger
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql.schema import Column, ForeignKey
 
 logger = logging.getLogger(__name__)
 
-DATABASE_URL = "sqlite:///pintag_data.db"
+DATABASE_URL = "sqlite+aiosqlite:///pintag_data.db"
 
 Base = declarative_base()
 
@@ -63,23 +64,28 @@ class Item(Base):
         return f"<Item(title='{self.title}', type='{self.content_type}')>"
 
 
-engine = create_engine(DATABASE_URL)
-Base.metadata.create_all(engine)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = create_async_engine(DATABASE_URL, echo=True)
+AsyncSessionLocal = async_sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        finally:
+            await session.close()
 
 
-def create_default_board(user_id: int, db):
+async def create_default_board(user_id: int, db: AsyncSession):
     default_board = Board(
         user_id=user_id,
         name="Неотсортированное",
-        emoji = "📥"
+        emoji="📥"
     )
     db.add(default_board)
+    await db.commit()
+    await db.refresh(default_board)
     return default_board

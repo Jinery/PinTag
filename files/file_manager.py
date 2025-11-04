@@ -55,6 +55,7 @@ class FileManager:
         if path_to_file.exists():
             if path_to_file.is_file():
                 os.remove(path_to_file)
+                return
         raise FileNotFoundError(f"File not found: {path_to_file}")
 
 

@@ -3,16 +3,17 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import CallbackContext, ConversationHandler
 
-from database.database import get_db, Board, Item
+from database.database_worker import get_all_user_boards, get_board_by_name, update_board_name, create_new_board, \
+    get_all_items_by_board_id, get_item_by_title, get_all_items_by_keyword, remove_item_by_id, move_item, \
+    get_all_user_board_count, get_all_user_item_count, get_item_stats, create_new_item, get_board_by_id, get_item_by_id, \
+    get_board_item_count
 from files.encryption_manager import encryption_manager
 from files.file_manager import file_manager
-from utils.item_searcher import find_item_by_title, find_items_by_keyword, find_item_by_id
 
 logger = logging.getLogger(__name__)
 GET_TITLE, SELECT_BOARD = range(2)
@@ -45,57 +46,55 @@ def extract_content_info(message):
 
 
 async def send_board_selection(update: Update, context: CallbackContext) -> int:
-    user_id = update.effective_user.id
+    try:
+        user_id = update.effective_user.id
 
-    db = next(get_db())
-    boards = db.query(Board).filter(Board.user_id == user_id).order_by(Board.name).all()
-    db.close()
+        boards = await get_all_user_boards(user_id)
 
-    keyboard = []
+        keyboard = []
 
-    for board in boards:
-        callback_data = f"board:{board.id}"
-        button_text = f"{board.emoji} {board.name}"
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
+        for board in boards:
+            callback_data = f"board:{board.id}"
+            button_text = f"{board.emoji} {board.name}"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
 
-    keyboard.append([InlineKeyboardButton("➕ Создать новую доску", callback_data="create_new_board")])
-    keyboard.append([InlineKeyboardButton("❌ Отмена добавления", callback_data="cancel_add_item")])
+        keyboard.append([InlineKeyboardButton("➕ Создать новую доску", callback_data="create_new_board")])
+        keyboard.append([InlineKeyboardButton("❌ Отмена добавления", callback_data="cancel_add_item")])
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(keyboard)
 
-    await context.bot.send_message(
-        chat_id = user_id,
-        text="Куда ты хочешь сохранить этот элемент? Выбери доску или создай новую:",
-        reply_markup=reply_markup,
-    )
-    return SELECT_BOARD
+        await context.bot.send_message(
+            chat_id = user_id,
+            text="Куда ты хочешь сохранить этот элемент? Выбери доску или создай новую:",
+            reply_markup=reply_markup,
+        )
+        return SELECT_BOARD
+    except SQLAlchemyError as sqlex:
+        logger.error(sqlex)
 
 
 async def boards_command(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
-    db = next(get_db())
     message = ""
 
     try:
-        boards = db.query(Board).filter(Board.user_id == user_id).all()
+        boards = await get_all_user_boards(user_id)
         if not boards:
             message = "У тебя пока нет доски. Создай первую."
         else:
             board_list = "\n".join(
-                [f"{b.emoji} **{b.name}** ({len(b.items)} элементов)" for b in boards]
+                [f"{b.emoji} <b>{b.name}</b> ({await get_board_item_count(user_id, b.id)} элементов)" for b in boards]
             )
             message = (
-                f"📚 **Твои Доски:**\n\n"
+                f"📚 <b>Твои Доски:</b>\n\n"
                 f"{board_list}\n\n"
                 f"Чтобы создать новую доску, используй команду /createboard <название> <эмодзи>"
             )
 
-        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(message, parse_mode=ParseMode.HTML)
     except SQLAlchemyError as sqlex:
-        logger.error(f"SQLAlchemy Error on /boards command: {sqlex}")
+        logger.error(f"SQL Error on /boards command: {sqlex}")
         await update.message.reply_text("Произошла ошибка базы данных, попробуй позже.")
-    finally:
-        db.close()
 
 
 async def rename_board_command(update: Update, context: CallbackContext) -> None:
@@ -110,40 +109,28 @@ async def rename_board_command(update: Update, context: CallbackContext) -> None
     new_name = context.args[1]
     new_emoji = context.args[2] if len(context.args) > 2 else None
 
-    db = next(get_db())
     try:
-        board = db.query(Board).filter(
-            Board.user_id == user_id,
-            Board.name == old_name,
-        ).first()
+        board = await get_board_by_name(user_id, old_name)
 
         if not board:
-            await update.message.reply_text(f"❌ Доска с названием *{old_name}* не найдена.",
-                                          parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"❌ Доска с названием <b>{old_name}</b> не найдена.",
+                                          parse_mode=ParseMode.HTML)
             return
 
-        existing_board = db.query(Board).filter(
-            Board.user_id == user_id,
-            Board.name == new_name
-        ).first()
+        existing_board = await get_board_by_name(user_id, new_name)
 
         if existing_board and existing_board.id != board.id:
-            await update.message.reply_text(f"❌ Доска с названием *{new_name}* уже существует.",
-                                            parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"❌ Доска с названием <b>{new_name}</b> уже существует.",
+                                            parse_mode=ParseMode.HTML)
             return
 
-        old_emoji = board.emoji
-        board.name = new_name
-        board.emoji = new_emoji if new_emoji else old_emoji
-        db.commit()
+        old_name, old_emoji, new_name, new_emoji = await update_board_name(user_id, board, new_name, new_emoji)
 
-        await update.message.edit_text(f"✅ Доска *{old_emoji} {old_name}* переименована в *{new_emoji} {new_name}*!",
-                                       parse_mode=ParseMode.MARKDOWN)
+        await update.message.edit_text(f"✅ Доска <b>{old_emoji} {old_name}</b> переименована в <b>{new_emoji} {new_name}</b>!",
+                                       parse_mode=ParseMode.HTML)
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error on /renameboard command: {sqlex}")
         await update.message.reply_text("❌ Ошибка базы данных при переименовании доски.")
-    finally:
-        db.close()
 
 
 async def create_new_board_command(update: Update, context: CallbackContext) -> None:
@@ -159,33 +146,20 @@ async def create_new_board_command(update: Update, context: CallbackContext) -> 
         board_name = context.args[0]
         board_emoji = "📁"
 
-    db = next(get_db())
-
     try:
-        existing_board = db.query(Board).filter(
-            Board.user_id == user_id,
-            Board.name.ilike(board_name),
-        ).first()
+        existing_board = await get_board_by_name(user_id, board_name)
 
         if existing_board:
-            await update.message.reply_text(f"Доска с названием **{board_name}** уже существует. Попробуй другое название.",
-                                            parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"Доска с названием <b>{board_name}</b> уже существует. Попробуй другое название.",
+                                            parse_mode=ParseMode.HTML)
             return
 
-        new_board = Board(
-            name=board_name,
-            emoji=board_emoji,
-            user_id=user_id,
-        )
-        db.add(new_board)
-        db.commit()
-        await update.message.reply_text(f"✅ Новая доска **{board_emoji} {board_name}** успешно создана!",
-                                        parse_mode=ParseMode.MARKDOWN)
+        await create_new_board(user_id, board_name, board_emoji)
+        await update.message.reply_text(f"✅ Новая доска <b>{board_emoji} {board_name}</b> успешно создана!",
+                                        parse_mode=ParseMode.HTML)
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error on /createboard command: {sqlex}")
         await update.message.reply_text("Ошибка базы данных при создании доски")
-    finally:
-        db.close()
 
 
 async def show_command(update: Update, context: CallbackContext) -> None:
@@ -196,24 +170,19 @@ async def show_command(update: Update, context: CallbackContext) -> None:
         return
 
     board_name = " ".join(context.args)
-    db = next(get_db())
-
     try:
-        board = db.query(Board).filter(
-            Board.user_id == user_id,
-            func.lower(Board.name) == func.lower(board_name),
-        ).first()
+        board = await get_board_by_name(user_id, board_name)
 
         if not board:
-            await update.message.reply_text(f"Доска с названием *{board_name}* не найдена.",
-                                            parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"Доска с названием <b>{board_name}</b> не найдена.",
+                                            parse_mode=ParseMode.HTML)
             return
 
-        items = db.query(Item).filter(Item.board_id == board.id).order_by(Item.title).all()
+        items = await get_all_items_by_board_id(user_id, board.id)
 
         if not items:
-            await update.message.reply_text(f"Доска **{board.emoji} {board.name}** пуста.",
-                                            parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"Доска <b>{board.emoji} {board.name}</b> пуста.",
+                                            parse_mode=ParseMode.HTML)
             return
 
         item_list = "\n".join(
@@ -221,17 +190,15 @@ async def show_command(update: Update, context: CallbackContext) -> None:
         )
 
         message = (
-            f"📦 **Элементы в доске {board.emoji} {board.name}**:\n\n"
+            f"📦 <b>Элементы в доске {board.emoji} {board.name}</b>:\n\n"
             f"{item_list}\n\n"
             f"Чтобы получить элемент, используй: /view <название>"
         )
-        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(message, parse_mode=ParseMode.HTML)
 
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error on /show command: {sqlex}")
         await update.message.reply_text("Произошла ошибка базы данных при просмотре доски.")
-    finally:
-        db.close()
 
 
 async def view_command(update: Update, context: CallbackContext) -> None:
@@ -242,14 +209,13 @@ async def view_command(update: Update, context: CallbackContext) -> None:
         return
 
     item_title = " ".join(context.args)
-    db = next(get_db())
 
     try:
-        items = find_items_by_keyword(db, user_id, item_title)
+        items = await get_all_items_by_keyword(user_id, item_title)
 
         if not items:
-            await update.message.reply_text(f"Элемент, содержащий *{item_title}* не найден.",
-                                            parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"Элемент, содержащий <b>{item_title}</b> не найден.",
+                                            parse_mode=ParseMode.HTML)
             return
 
         if len(items) > 1:
@@ -257,11 +223,11 @@ async def view_command(update: Update, context: CallbackContext) -> None:
                 [f"• {item.title} (в доске {item.board.emoji} {item.board.name})" for item in items]
             )
             message = (
-                f"Найдено *{len(items)}* совпадений для *'{item_title}'*:\n\n"
+                f"Найдено <b>{len(items)}</b> совпадений для <b>'{item_title}'</b>:\n\n"
                 f"{item_list}\n\n"
                 f"Уточни название для команды /view, чтобы получить нужный элемент."
             )
-            await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(message, parse_mode=ParseMode.HTML)
             return
 
         item = items[0]
@@ -270,25 +236,25 @@ async def view_command(update: Update, context: CallbackContext) -> None:
             [InlineKeyboardButton(f"🗑 Удалить", callback_data=f"remove_item:{item.id}")],
         ])
 
-        caption = f"*{item.title}* (из доски *{item.board.name}*):\n"
+        caption = f"<b>{item.title}</b> (из доски <b>{item.board.name}</b>):\n"
 
         if item.content_type in ('photo', 'document', 'video'):
-            caption = f"*{item.title}* (из доски *{item.board.name}*):"
+            caption = f"<b>{item.title}</b> (из доски <b>{item.board.name}</b>):"
 
             try:
                 if item.content_data:
                     try:
                         if item.content_type == 'photo':
                             await update.message.reply_photo(item.content_data, caption=caption,
-                                                             parse_mode=ParseMode.MARKDOWN,
+                                                             parse_mode=ParseMode.HTML,
                                                              reply_markup=reply_markup)
                         elif item.content_type == 'document':
                             await update.message.reply_document(item.content_data, caption=caption,
-                                                                parse_mode=ParseMode.MARKDOWN,
+                                                                parse_mode=ParseMode.HTML,
                                                                 reply_markup=reply_markup)
                         elif item.content_type == 'video':
                             await update.message.reply_video(item.content_data, caption=caption,
-                                                             parse_mode=ParseMode.MARKDOWN,
+                                                             parse_mode=ParseMode.HTML,
                                                              reply_markup=reply_markup)
                         return
                     except Exception as e:
@@ -303,14 +269,14 @@ async def view_command(update: Update, context: CallbackContext) -> None:
                     filename = Path(item.file_path).name
 
                     if item.content_type == 'photo':
-                        await update.message.reply_photo(file_data, caption=caption, parse_mode=ParseMode.MARKDOWN)
+                        await update.message.reply_photo(file_data, caption=caption, parse_mode=ParseMode.HTML)
                     elif item.content_type == 'document':
                         await update.message.reply_document(file_data, caption=caption, filename=filename,
-                                                            parse_mode=ParseMode.MARKDOWN,
+                                                            parse_mode=ParseMode.HTML,
                                                             reply_markup=reply_markup)
                     elif item.content_type == 'video':
                         await update.message.reply_video(file_data, caption=caption,
-                                                         parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+                                                         parse_mode=ParseMode.HTML, reply_markup=reply_markup)
                 else:
                     await update.message.reply_text("❌ Файл не найден на сервере")
             except Exception as e:
@@ -318,15 +284,13 @@ async def view_command(update: Update, context: CallbackContext) -> None:
                 await update.message.reply_text(f"❌ Ошибка при отправке {item.content_type}")
         else:
             await update.message.reply_text(caption + item.content_data,
-                                            parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+                                            parse_mode=ParseMode.HTML, reply_markup=reply_markup)
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error on /view command: {sqlex}")
         await update.message.reply_text("Произошла ошибка базы данных при получении элемента.")
     except Exception as e:
         logger.error(f"Exception on sending content: {e}")
         await update.message.reply_text("Ошибка при отправке контента (возможно, file_id устарел или неверен).")
-    finally:
-        db.close()
 
 
 async def remove_command(update: Update, context: CallbackContext) -> None:
@@ -337,15 +301,17 @@ async def remove_command(update: Update, context: CallbackContext) -> None:
         return
 
     item_title = " ".join(context.args)
-    db = next(get_db())
 
     try:
-        item = find_item_by_title(db, user_id, item_title)
+        item = await get_item_by_title(user_id, item_title)
 
         if not item:
-            await update.message.reply_text(f"Элемент с названием **'{item_title}'** не найден.",
-                                            parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"Элемент с названием <b>'{item_title}'</b> не найден.",
+                                            parse_mode=ParseMode.HTML)
             return
+
+        board = await get_board_by_id(user_id, item.board_id)
+        board_name = board.name if board else "Неизвестная доска"
 
         if item.content_type in ['photo', 'document', 'video'] and item.file_path:
             try:
@@ -354,19 +320,13 @@ async def remove_command(update: Update, context: CallbackContext) -> None:
             except Exception as e:
                 logger.error(f"Error deleting file {item.file_path}: {e}")
 
-        board_name = item.board.name
-        db.delete(item)
-        db.commit()
+        await remove_item_by_id(user_id, item.id)
 
-        await update.message.reply_text(f"🗑️ Элемент **'{item_title}'** (из доски **{board_name}**) был успешно удален.",
-                                        parse_mode=ParseMode.MARKDOWN)
-
+        await update.message.reply_text(f"🗑️ Элемент <b>'{item_title}'</b> (из доски <b>{board_name}</b>) был успешно удален.",
+                                        parse_mode=ParseMode.HTML)
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error on /remove command: {sqlex}")
         await update.message.reply_text("Произошла ошибка базы данных при удалении элемента.")
-    finally:
-        db.close()
-
 
 
 async def move_command(update: Update, context: CallbackContext) -> None:
@@ -379,62 +339,48 @@ async def move_command(update: Update, context: CallbackContext) -> None:
     target_board_name = context.args[-1]
     item_title = " ".join(context.args[:-1])
 
-    db = next(get_db())
     try:
-        item = find_item_by_title(db, user_id, item_title)
+        item = await get_item_by_title(user_id, item_title)
 
         if not item:
-            await update.message.reply_text(f"Элемент с названием *{item_title}* не найден.",
-                                            parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"Элемент с названием <b>{item_title}</b> не найден.",
+                                            parse_mode=ParseMode.HTML)
             return
 
         old_board_name = item.board.name
-
-        target_board = db.query(Board).filter(
-            Board.user_id == user_id,
-            func.lower(Board.name) == func.lower(target_board_name)
-        ).first()
+        target_board = await get_board_by_name(user_id, target_board_name)
 
         if not target_board:
-            await update.message.reply_text(f"Доска с названием: *{target_board_name} не найдена.*",
-                                            parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"Доска с названием: <b>{target_board_name}</b> не найдена.",
+                                            parse_mode=ParseMode.HTML)
             return
 
         if item.board_id == target_board.id:
-            await update.message.reply_text(f"Элемент *{item_title}* уже находит в доске *{target_board_name}*",
-                                            parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(f"Элемент <b>{item_title}</b> уже находит в доске <b>{target_board_name}</b>",
+                                            parse_mode=ParseMode.HTML)
             return
 
-        item.board_id = target_board.id
-        db.commit()
+        await move_item(item, target_board.id)
 
-        await update.message.reply_text(f"✅ Элемент *{item_title}* успешно перемещён из *{old_board_name}* в *{target_board_name}*",
-                                        parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"✅ Элемент <b>{item_title}</b> успешно перемещён из <b>{old_board_name}</b> в <b>{target_board_name}</b>",
+                                        parse_mode=ParseMode.HTML)
 
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error on /move command: {sqlex}")
         await update.message.reply_text("Произошла ошибка базы данных при перемещении элемента.")
-    finally:
-        db.close()
 
 
 async def stats_command(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
-    db = next(get_db())
 
     try:
-        board_count = db.query(Board).filter(Board.user_id == user_id).count()
-        total_items = db.query(Item).filter(Item.user_id == user_id).count()
+        board_count = await get_all_user_board_count(user_id)
+        total_items = await get_all_user_item_count(user_id)
 
-        item_stats = db.query(
-            Item.content_type,
-            func.count(Item.id),
-        ).filter(
-            Item.user_id == user_id,
-        ).group_by(Item.content_type).all()
+        item_stats = await get_item_stats(user_id)
 
         if total_items == 0:
-            message = "📊 *Твоя Статистика PinTag:*\n\n" \
+            message = "📊 <b>Твоя Статистика PinTag:</b>\n\n" \
                       "У тебя пока нет сохраненных элементов."
         else:
             type_mapping = {
@@ -454,20 +400,18 @@ async def stats_command(update: Update, context: CallbackContext) -> None:
             stats_text = "\n".join(stats_list)
 
             message = (
-                f"📊 *Твоя Статистика PinTag:*\n\n"
-                f"🔸 *Доски:* {board_count}\n"
-                f"🔸 *Всего элементов:* {total_items}\n\n"
-                f"*Разбивка по типу контента:*\n"
+                f"📊 <b>Твоя Статистика PinTag:</b>\n\n"
+                f"🔸 <b>Доски:</b> {board_count}\n"
+                f"🔸 <b>Всего элементов:</b> {total_items}\n\n"
+                f"<b>Разбивка по типу контента:</b>\n"
                 f"{stats_text}"
             )
 
-            await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(message, parse_mode=ParseMode.HTML)
 
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error on /stats command: {sqlex}")
         await update.message.reply_text("Ошибка базы данных при обработке статистики")
-    finally:
-        db.close()
 
 
 async def add_item_conservation(update: Update, context: CallbackContext) -> int:
@@ -518,8 +462,8 @@ async def add_item_conservation(update: Update, context: CallbackContext) -> int
 
     await message.reply_text(
         f"✅ Отлично, я получил твой контент.\n\n"
-        f"*Шаг 1 из 2:* Придумай название для этого элемента.",
-        parse_mode=ParseMode.MARKDOWN,
+        f"<b>Шаг 1 из 2:</b> Придумай название для этого элемента.",
+        parse_mode=ParseMode.HTML,
     )
     return GET_TITLE
 
@@ -537,7 +481,7 @@ async def get_title(update: Update, context: CallbackContext) -> int:
         final_title = context.user_data.get('suggested_item', "Элемент без названия")
 
     context.user_data["temp_item"]["title"] = final_title
-    await update.message.reply_text(f"🔥 Отлично! Название: **{final_title}**.", parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(f"🔥 Отлично! Название: <b>{final_title}</b>.", parse_mode=ParseMode.HTML)
     return await send_board_selection(update, context)
 
 
@@ -563,31 +507,20 @@ async def inline_board_selection(update: Update, context: CallbackContext) -> in
             current_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
             board_name = f"{current_time}-Новая-доска"
             board_emoji = "📁"
-            db = next(get_db())
 
             try:
-                existing_board = db.query(Board).filter(
-                    Board.user_id == user_id,
-                    Board.name == board_name
-
-                ).first()
+                existing_board = await get_board_by_name(user_id, board_name)
 
                 if existing_board:
                     import random
                     board_name = f"{current_time}-Новая-доска-{random.randint(1000, 9999)}"
 
-                new_board = Board(
-                    name=board_name,
-                    emoji=board_emoji,
-                    user_id=user_id,
-                )
-                db.add(new_board)
-                db.commit()
+                new_board = await create_new_board(user_id, board_name, board_emoji)
 
                 board_id = new_board.id
                 item_data = context.user_data["temp_item"]
 
-                new_item = Item(
+                await create_new_item(
                     user_id=user_id,
                     board_id=board_id,
                     title=item_data["title"],
@@ -597,14 +530,12 @@ async def inline_board_selection(update: Update, context: CallbackContext) -> in
                     file_size=item_data["file_size"],
                     encrypted=item_data["encrypted"],
                 )
-                db.add(new_item)
-                db.commit()
 
                 await context.bot.edit_message_text(
                     chat_id=user_id,
                     message_id=query.message.message_id,
-                    text=f"✅ Создана новая доска *{board_emoji} {board_name}* и элемент *'{item_data['title']}'* сохранен в неё!",
-                    parse_mode=ParseMode.MARKDOWN
+                    text=f"✅ Создана новая доска <b>{board_emoji} {board_name}</b> и элемент <b>'{item_data['title']}'</b> сохранен в неё!",
+                    parse_mode=ParseMode.HTML
                 )
             except SQLAlchemyError as sqlex:
                 logger.error(f"SQLAlchemy Error creating board: {sqlex}")
@@ -621,7 +552,6 @@ async def inline_board_selection(update: Update, context: CallbackContext) -> in
                     text="Произошла ошибка."
                 )
             finally:
-                db.close()
                 context.user_data.pop("temp_item", None)
                 return ConversationHandler.END
 
@@ -637,11 +567,9 @@ async def inline_board_selection(update: Update, context: CallbackContext) -> in
                 return ConversationHandler.END
 
             item_data = context.user_data["temp_item"]
-            db = next(get_db())
 
             try:
-                new_item = Item(
-                    user_id=user_id,
+                new_item = await create_new_item(user_id=user_id,
                     board_id=board_id,
                     title=item_data["title"],
                     content_type=item_data["content_type"],
@@ -650,17 +578,15 @@ async def inline_board_selection(update: Update, context: CallbackContext) -> in
                     file_size=item_data["file_size"],
                     encrypted=item_data["encrypted"],
                 )
-                db.add(new_item)
-                db.commit()
 
-                board = db.query(Board).filter(Board.id == board_id).first()
+                board = await get_board_by_id(user_id, board_id)
                 board_name = board.name if board else "Неизвестная доска"
 
                 await context.bot.edit_message_text(
                     chat_id=user_id,
                     message_id=query.message.message_id,
-                    text=f"✅ Элемент **'{item_data['title']}'** успешно сохранен в доску **{board_name}**!",
-                    parse_mode=ParseMode.MARKDOWN
+                    text=f"✅ Элемент <b>'{item_data['title']}'</b> успешно сохранен в доску <b>{board_name}</b>!",
+                    parse_mode=ParseMode.HTML
                 )
 
             except SQLAlchemyError as sqlex:
@@ -678,7 +604,6 @@ async def inline_board_selection(update: Update, context: CallbackContext) -> in
                     text="Произошла непредвиденная ошибка. Попробуй еще раз."
                 )
             finally:
-                db.close()
                 context.user_data.pop("temp_item", None)
                 return ConversationHandler.END
 
@@ -704,16 +629,10 @@ async def inline_board_item(update: Update, context: CallbackContext) -> None:
         if action.startswith("remove_item:"):
             item_id = int(action.split(":")[1])
 
-            db = next(get_db())
-            item = find_item_by_id(db, user_id, item_id)
+            item = await get_item_by_id(user_id, item_id)
 
             if not item:
-                await context.bot.edit_message_text(
-                    chat_id=user_id,
-                    message_id=query.message.message_id,
-                    text=f"Элемент с id *{item_id}* не был найден.",
-                    parse_mode=ParseMode.MARKDOWN
-                )
+                await query.answer(text=f"Элемент с id <b>{item_id}</b> не был найден.")
                 return
 
             if item.content_type in ['photo', 'document', 'video'] and item.file_path:
@@ -724,14 +643,8 @@ async def inline_board_item(update: Update, context: CallbackContext) -> None:
                     logger.error(f"Error deleting file {item.file_path}: {e}")
 
             item_name = item.title
-            db.delete(item)
-            db.commit()
-            await context.bot.edit_message_text(
-                chat_id=user_id,
-                message_id=query.message.message_id,
-                text=f"✅ Элемент *{item_name}({item_id})* успешно удалён.",
-                parse_mode=ParseMode.MARKDOWN
-            )
+            await remove_item_by_id(user_id, item.id)
+            await query.answer(text=f"✅ Элемент <b>{item_name}({item_id})</b> успешно удалён.")
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error on delete element in database: {sqlex}")
         await context.bot.sendMessage(

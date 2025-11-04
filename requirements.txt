@@ -1,4 +1,5 @@
 python-telegram-bot
 sqlalchemy
+aiosqlite
 python-dotenv
 cryptography

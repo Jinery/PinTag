@@ -5,45 +5,52 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import CallbackContext
 
-from database.database import get_db, User, create_default_board
+from database.database import get_db, User, create_default_board, Board
 
 logger = logging.getLogger(__name__)
 
+
 async def start_command(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
-
-    db = next(get_db())
     greeting = ""
 
     try:
-        user_db = db.query(User).filter(User.id == user.id).first()
+        async for db in get_db():
+            user_db = await db.get(User, user.id)
 
-        if not user_db:
-            user_db = User(
-                id = user.id,
-                username = user.username,
-                first_name = user.first_name,
-            )
-            db.add(user_db)
+            if not user_db:
+                user_db = User(
+                    id=user.id,
+                    username=user.username,
+                    first_name=user.first_name,
+                )
+                db.add(user_db)
 
-            board = create_default_board(user.id, db)
-            db.commit()
+                default_board = Board(
+                    user_id=user.id,
+                    name="Неотсортированное",
+                    emoji="📥"
+                )
+                db.add(default_board)
 
-            logger.info(f"Created new user in database {user_db.username}")
-            greeting = (
-                f"Привет, {user.mention_markdown()}! 👋 Я **PinTag**, и я готов помочь тебе победить хаос!\n\n"
-                f"Я создал для тебя первую доску: **{board.emoji}{board.name}**.\n"
-                f"Отправь мне ссылку или файл, чтобы начать!"
-            )
-        else:
-            greeting = f"С возвращением, {user.mention_markdown()}! Рад снова видеть тебя☺️"
+                await db.commit()
+                await db.refresh(default_board)
 
-        await update.message.reply_text(greeting, parse_mode=ParseMode.MARKDOWN)
+                logger.info(f"Created new user in database {user_db.username}")
+                greeting = (
+                    f"Привет, {user.mention_markdown()}! 👋 Я **PinTag**, и я готов помочь тебе победить хаос!\n\n"
+                    f"Я создал для тебя первую доску: **{default_board.emoji} {default_board.name}**.\n"
+                    f"Отправь мне ссылку или файл, чтобы начать!"
+                )
+            else:
+                greeting = f"С возвращением, {user.mention_markdown()}! Рад снова видеть тебя☺️"
+
+            await update.message.reply_text(greeting, parse_mode=ParseMode.MARKDOWN)
+            break
+
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error: {sqlex}")
-        await update.message.reply_html("Ошибка в базе данных, попробуйте позже.")
-    finally:
-        db.close()
+        await update.message.reply_text("Ошибка в базе данных, попробуйте позже.")
 
 
 async def help_command(update: Update, context: CallbackContext) -> None:

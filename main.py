@@ -1,9 +1,11 @@
+import asyncio
 import os
 
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, CallbackQueryHandler
 
+from database.database import init_db
 from handler.handlers import start_command, help_command
 
 from handler.database_handler import create_new_board_command, boards_command, cancel_add_item, \
@@ -14,6 +16,9 @@ load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 def main():
+
+    asyncio.run(init_db())
+
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(ConversationHandler(
@@ -33,6 +38,8 @@ def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("createboard", create_new_board_command))
+
+
     application.add_handler(CommandHandler("boards", boards_command))
     application.add_handler(CommandHandler("show", show_command))
     application.add_handler(CommandHandler("view", view_command))
