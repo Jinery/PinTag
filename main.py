@@ -11,8 +11,9 @@ from database.database import init_db
 from handler.auth_handler import handle_connection_approval, list_connections_command
 from handler.handlers import start_command, help_command
 
-from handler.database_handler import create_new_board_command, boards_command, cancel_add_item, \
+from Handler.database_handler import create_new_board_command, boards_command, cancel_add_item, \
     add_item_conservation, GET_TITLE, get_title, SELECT_BOARD, inline_board_selection, show_command, view_command, \
+    remove_command, move_command, stats_command, inline_board_item, rename_board_command, inline_item_selection
     remove_command, move_command, stats_command, inline_board_item, rename_board_command, inline_item_selection
 
 from handler.database_handler import remove_board_command

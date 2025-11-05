@@ -1,12 +1,9 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
-
 from database.database import Item
 
 
 async def find_item_by_title(db, user_id: int, title: str) -> Item:
-    from sqlalchemy.orm import selectinload
-
     result = await db.execute(
         select(Item)
         .options(selectinload(Item.board))
