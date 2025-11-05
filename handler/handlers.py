@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import CallbackContext
 
-from database.database import get_db, User, create_default_board, Board
+from Database.database import get_db, User, Board
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,8 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         "🔸 /view <название> — Получить сохраненный элемент.\n"
         "🔸 /move <название> <доска> — Переместить элемент.\n"
         "🔸 /remove <название> — Удалить элемент.\n"
-        "🔸 /stats — Твоя статистика (пока не работает)."
+        "🔸 /stats — Твоя статистика.\n"
+        "🔸 /renameboard <старое название> <новое название> [стикер] — Переименовать доску.\n"
+        "🔸 /removeboard <название доски> — Удалить доску со всем её содержимым."
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)

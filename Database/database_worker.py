@@ -2,7 +2,7 @@ import logging
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from database.database import get_db, Board, Item
+from Database.database import get_db, Item, Board
 from utils.item_searcher import find_item_by_id, find_item_by_title, find_items_by_keyword
 
 logger = logging.getLogger()
@@ -163,6 +163,26 @@ async def create_new_board(user_id: int, board_name: str, board_emoji: str):
         except SQLAlchemyError as sqlex:
             await db.rollback()
             raise sqlex
+
+
+async def remove_board_by_id(user_id: int, board_id: int):
+    async for db in get_db():
+        try:
+            result = await db.execute(
+                select(Board).filter(Board.id == board_id, Board.user_id == user_id)
+            )
+            board = result.scalar_one_or_none()
+
+            if not board:
+                raise ValueError("Board not found")
+
+            await db.delete(board)
+            await db.commit()
+            return True
+        except SQLAlchemyError as sqlex:
+            await db.rollback()
+            raise sqlex
+
 
 
 async def get_all_items_by_board_id(user_id: int, board_id: int):

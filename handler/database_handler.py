@@ -8,10 +8,12 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import CallbackContext, ConversationHandler
 
-from database.database_worker import get_all_user_boards, get_board_by_name, update_board_name, create_new_board, \
+from Database.database_worker import get_all_user_boards, get_board_by_name, update_board_name, create_new_board, \
     get_all_items_by_board_id, get_item_by_title, get_all_items_by_keyword, remove_item_by_id, move_item, \
     get_all_user_board_count, get_all_user_item_count, get_item_stats, create_new_item, get_board_by_id, get_item_by_id, \
     get_board_item_count
+
+from Database.database_worker import remove_board_by_id
 from files.encryption_manager import encryption_manager
 from files.file_manager import file_manager
 
@@ -305,15 +307,10 @@ async def remove_command(update: Update, context: CallbackContext) -> None:
     try:
         item = await get_item_by_title(user_id, item_title)
 
-        if not item:
-            await update.message.reply_text(f"Элемент с названием <b>'{item_title}'</b> не найден.",
-                                            parse_mode=ParseMode.HTML)
-            return
-
         board = await get_board_by_id(user_id, item.board_id)
         board_name = board.name if board else "Неизвестная доска"
 
-        if item.content_type in ['photo', 'document', 'video'] and item.file_path:
+        if item.content_type in ALL_FILE_TYPES and item.file_path:
             try:
                 file_manager.delete_file(item.file_path)
                 print(f"Removed file: {item.file_path}")
@@ -327,6 +324,45 @@ async def remove_command(update: Update, context: CallbackContext) -> None:
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error on /remove command: {sqlex}")
         await update.message.reply_text("Произошла ошибка базы данных при удалении элемента.")
+    except ValueError as vex:
+        logger.error(f"ValueError on /remove command: {vex}")
+        await update.message.reply_text(f"Элемент с названием <b>'{item_title}'</b> не найден.",
+                                        parse_mode=ParseMode.HTML)
+
+
+async def remove_board_command(update: Update, context: CallbackContext) -> None:
+    user_id = update.effective_user.id
+
+    if not context.args:
+        await update.message.reply_text("Укажи название доски для удаления, например: /removeboard Неотсортированное")
+        return
+
+    board_name = " ".join(context.args)
+    try:
+        board = await get_board_by_name(user_id, board_name)
+
+        items = get_all_items_by_board_id(user_id, board.id)
+        for item in items:
+            if item.content_type in ALL_FILE_TYPES and item.file_path:
+                try:
+                    file_manager.delete_file(item.file_path)
+                    print(f"Removed file: {item.file_path}")
+                except Exception as e:
+                    logger.error(f"Error deleting file {item.file_path}: {e}")
+
+            await remove_item_by_id(user_id, item.id)
+        await remove_board_by_id(user_id, board.id)
+
+        await update.message.reply_text(f"🗑️ Доска <b>'{board_name}'</b> и все её элементы были успешно удалены.",
+                                        parse_mode=ParseMode.HTML)
+    except SQLAlchemyError as sqlex:
+        logger.error(f"SQLAlchemy Error on /remove command: {sqlex}")
+        await update.message.reply_text("Произошла ошибка базы данных при удалении доски.")
+    except ValueError as vex:
+        logger.error(f"ValueError on /remove command: {vex}")
+        await update.message.reply_text(f"Доска с названием <b>'{board_name}'</b> не найдена.",
+                                        parse_mode=ParseMode.HTML)
+
 
 
 async def move_command(update: Update, context: CallbackContext) -> None:
@@ -635,7 +671,7 @@ async def inline_board_item(update: Update, context: CallbackContext) -> None:
                 await query.answer(text=f"Элемент с id <b>{item_id}</b> не был найден.")
                 return
 
-            if item.content_type in ['photo', 'document', 'video'] and item.file_path:
+            if item.content_type in ALL_FILE_TYPES and item.file_path:
                 try:
                     file_manager.delete_file(item.file_path)
                     print(f"Removed file: {item.file_path}")
