@@ -3,3 +3,6 @@ sqlalchemy
 aiosqlite
 python-dotenv
 cryptography
+fastapi
+uvicorn
+python-multipart

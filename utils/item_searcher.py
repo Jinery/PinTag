@@ -21,7 +21,7 @@ async def find_item_by_title(db, user_id: int, title: str) -> Item:
 async def find_item_by_id(db, user_id: int, item_id: int) -> Item:
     result = await db.execute(
         select(Item)
-        .options(selectinload(Item.board))  # Это ключевое!
+        .options(selectinload(Item.board))
         .filter(
             Item.user_id == user_id,
             Item.id == item_id,

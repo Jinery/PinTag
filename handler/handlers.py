@@ -12,44 +12,45 @@ logger = logging.getLogger(__name__)
 
 async def start_command(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
-
     try:
         async for db in get_db():
             user_db = await db.get(User, user.id)
 
             if not user_db:
+                user_id = user.id
+                username = user.username
+                first_name = user.first_name
+                board_emoji = "📥"
+                board_name = "Неотсортированное"
+
                 user_db = User(
-                    id=user.id,
-                    username=user.username,
-                    first_name=user.first_name,
+                    id=user_id,
+                    username=username,
+                    first_name=first_name,
                 )
                 db.add(user_db)
 
                 default_board = Board(
-                    user_id=user.id,
-                    name="Неотсортированное",
-                    emoji="📥"
+                    user_id=user_id,
+                    name=board_name,
+                    emoji=board_emoji
                 )
                 db.add(default_board)
-
                 await db.commit()
-                await db.refresh(default_board)
 
-                logger.info(f"Created new user in database {user_db.username}")
+                logger.info(f"Created new user: {user_id}")
                 greeting = (
-                    f"Привет, <b>{user.first_name}</b>! 👋 Я <b>PinTag</b>, и я готов помочь тебе победить хаос!\n\n"
-                    f"Я создал для тебя первую доску: <b>{default_board.emoji} {default_board.name}</b>.\n"
+                    f"Привет, <b>{first_name}</b>! 👋 Я <b>PinTag</b>, и я готов помочь тебе победить хаос!\n\n"
+                    f"Я создал для тебя первую доску: <b>{board_emoji} {board_name}</b>.\n"
                     f"Отправь мне ссылку или файл, чтобы начать!"
                 )
             else:
                 greeting = f"С возвращением, <b>{user.first_name}</b>! Рад снова видеть тебя☺️"
-
             await update.message.reply_text(greeting, parse_mode=ParseMode.HTML)
-            break
-
+            return
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error: {sqlex}")
-        await update.message.reply_text("Ошибка в базе данных, попробуйте позже.")
+        await update.message.reply_text("Ошибка в базе данных, попробуй позже.")
 
 
 async def help_command(update: Update, context: CallbackContext) -> None:

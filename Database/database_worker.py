@@ -1,8 +1,11 @@
+import datetime
 import logging
-from sqlalchemy import func, select
+import secrets
+
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 
-from database.database import get_db, Item, Board
+from database.database import get_db, Item, Board, UserConnection
 from utils.item_searcher import find_item_by_id, find_item_by_title, find_items_by_keyword
 
 logger = logging.getLogger()
@@ -284,5 +287,81 @@ async def get_item_stats(user_id: int):
                 .group_by(Item.content_type)
             )
             return result.all()
+        except SQLAlchemyError as sqlex:
+            raise sqlex
+
+
+async def create_user_connection(user_id: int, client_name: str):
+    async for db in get_db():
+        try:
+            connect_id = secrets.token_urlsafe(32)
+
+            from database.database import UserConnection
+            connection = UserConnection(
+                user_id=user_id,
+                connect_id=connect_id,
+                client_name=client_name,
+                status='pending'
+            )
+            db.add(connection)
+            await db.commit()
+            await db.refresh(connection)
+
+            return connection
+        except SQLAlchemyError as sqlex:
+            await db.rollback()
+            raise sqlex
+
+
+async def get_connection_by_id(connection_id: str):
+    async for db in get_db():
+        try:
+            result = await db.execute(
+                select(UserConnection).filter(UserConnection.connect_id == connection_id)
+            )
+            connection = result.scalar_one_or_none()
+
+            if connection:
+                db.expunge(connection)
+
+            return connection
+
+        except SQLAlchemyError as sqlex:
+            raise sqlex
+
+
+async def update_connection_status(connect_id: str, status: str):
+    async for db in get_db():
+        try:
+            if status == 'accepted':
+                result = await db.execute(
+                    update(UserConnection)
+                    .where(UserConnection.connect_id == connect_id)
+                    .values(status=status, confirmed_at=datetime.datetime.now(datetime.timezone.utc))
+                )
+            else:
+                result = await db.execute(
+                    update(UserConnection)
+                    .where(UserConnection.connect_id == connect_id)
+                    .values(status=status)
+                )
+
+            await db.commit()
+            return result.rowcount > 0
+
+        except SQLAlchemyError as sqlex:
+            await db.rollback()
+            raise sqlex
+
+
+async def get_user_connections(user_id: int):
+    async for db in get_db():
+        try:
+            result = await db.execute(
+                select(UserConnection)
+                .filter(UserConnection.user_id == user_id)
+                .order_by(UserConnection.created_at.desc())
+            )
+            return result.scalars().all()
         except SQLAlchemyError as sqlex:
             raise sqlex

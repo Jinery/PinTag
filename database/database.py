@@ -22,6 +22,7 @@ class User(Base):
 
     boards = relationship("Board", back_populates="user")
     items = relationship("Item", back_populates="user")
+    connections = relationship("UserConnection", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}')>"
@@ -63,6 +64,20 @@ class Item(Base):
     def __repr__(self):
         return f"<Item(title='{self.title}', type='{self.content_type}')>"
 
+
+class UserConnection(Base):
+    __tablename__ = 'user_connections'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    connect_id = Column(String(64), unique=True, nullable=False)
+    client_name = Column(String(100), nullable=False)
+    status = Column(String(20), default='pending')
+    access_token = Column(String(64), nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
+    confirmed_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="connections")
 
 engine = create_async_engine(DATABASE_URL, echo=True)
 AsyncSessionLocal = async_sessionmaker(autocommit=False, autoflush=False, bind=engine)
