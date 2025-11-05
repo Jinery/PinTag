@@ -5,14 +5,13 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import CallbackContext
 
-from Database.database import get_db, User, Board
+from database.database import get_db, User, Board
 
 logger = logging.getLogger(__name__)
 
 
 async def start_command(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
-    greeting = ""
 
     try:
         async for db in get_db():
@@ -38,14 +37,14 @@ async def start_command(update: Update, context: CallbackContext) -> None:
 
                 logger.info(f"Created new user in database {user_db.username}")
                 greeting = (
-                    f"Привет, {user.mention_markdown()}! 👋 Я **PinTag**, и я готов помочь тебе победить хаос!\n\n"
-                    f"Я создал для тебя первую доску: **{default_board.emoji} {default_board.name}**.\n"
+                    f"Привет, <b>{user.first_name}</b>! 👋 Я <b>PinTag</b>, и я готов помочь тебе победить хаос!\n\n"
+                    f"Я создал для тебя первую доску: <b>{default_board.emoji} {default_board.name}</b>.\n"
                     f"Отправь мне ссылку или файл, чтобы начать!"
                 )
             else:
-                greeting = f"С возвращением, {user.mention_markdown()}! Рад снова видеть тебя☺️"
+                greeting = f"С возвращением, <b>{user.first_name}</b>! Рад снова видеть тебя☺️"
 
-            await update.message.reply_text(greeting, parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(greeting, parse_mode=ParseMode.HTML)
             break
 
     except SQLAlchemyError as sqlex:

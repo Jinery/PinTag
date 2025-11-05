@@ -10,9 +10,9 @@ from handler.handlers import start_command, help_command
 
 from handler.database_handler import create_new_board_command, boards_command, cancel_add_item, \
     add_item_conservation, GET_TITLE, get_title, SELECT_BOARD, inline_board_selection, show_command, view_command, \
-    remove_command, move_command, stats_command, inline_board_item, rename_board_command
+    remove_command, move_command, stats_command, inline_board_item, rename_board_command, inline_item_selection
 
-from Handler.database_handler import remove_board_command
+from handler.database_handler import remove_board_command
 
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -51,7 +51,15 @@ def main():
     application.add_handler(CommandHandler("renameboard", rename_board_command))
     application.add_handler(CommandHandler("removeboard", remove_board_command))
 
-    application.add_handler(CallbackQueryHandler(inline_board_item))
+    application.add_handler(CallbackQueryHandler(
+        inline_item_selection,
+        pattern="^select_item:"
+    ))
+
+    application.add_handler(CallbackQueryHandler(
+        inline_board_item,
+        pattern="^remove_item:"
+    ))
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
