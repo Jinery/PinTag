@@ -111,7 +111,7 @@ async def get_board_by_name(user_id: int, board_name: str):
             result = await db.execute(
                 select(Board).filter(
                     Board.user_id == user_id,
-                    Board.name == board_name,
+                    func.lower(Board.name) == func.lower(board_name),
                 )
             )
             return result.scalar_one_or_none()
@@ -133,16 +133,28 @@ async def get_board_by_id(user_id: int, board_id: int):
             raise sqlex
 
 
-async def update_board_name(user_id: int, board: Board, new_name: str, new_emoji: str = None):
+async def update_board_name(user_id: int, board_id: int, new_name: str, new_emoji: str = None):
     async for db in get_db():
         try:
+            result = await db.execute(
+                select(Board).filter(
+                    Board.id == board_id,
+                    Board.user_id == user_id
+                )
+            )
+            board = result.scalar_one_or_none()
+
+            if not board:
+                raise ValueError("Board not found")
             old_name = board.name
             old_emoji = board.emoji
+            final_emoji = new_emoji if new_emoji else old_emoji
             board.name = new_name
-            board.emoji = new_emoji if new_emoji else old_emoji
+            board.emoji = final_emoji
+
             await db.commit()
 
-            return (old_name, old_emoji, new_emoji, new_name)
+            return (old_name, old_emoji, new_name, final_emoji)
         except SQLAlchemyError as sqlex:
             await db.rollback()
             raise sqlex
@@ -241,11 +253,23 @@ async def remove_item_by_id(user_id: int, item_id: int):
             raise sqlex
 
 
-async def move_item(item: Item, new_board_id: int):
+async def move_item(user_id: int, item_id: int, new_board_id: int):
     async for db in get_db():
         try:
+            result = await db.execute(
+                select(Item).filter(
+                    Item.id == item_id,
+                    Item.user_id == user_id
+                )
+            )
+            item = result.scalar_one_or_none()
+
+            if not item:
+                raise ValueError("Item not found")
+
             item.board_id = new_board_id
             await db.commit()
+
         except SQLAlchemyError as sqlex:
             await db.rollback()
             raise sqlex

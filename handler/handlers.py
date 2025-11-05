@@ -1,7 +1,7 @@
 import logging
 
 from sqlalchemy.exc import SQLAlchemyError
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.constants import ParseMode
 from telegram.ext import CallbackContext
 
@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 async def start_command(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
-    greeting = ""
 
     try:
         async for db in get_db():
@@ -38,14 +37,20 @@ async def start_command(update: Update, context: CallbackContext) -> None:
 
                 logger.info(f"Created new user in database {user_db.username}")
                 greeting = (
-                    f"Привет, {user.mention_markdown()}! 👋 Я **PinTag**, и я готов помочь тебе победить хаос!\n\n"
-                    f"Я создал для тебя первую доску: **{default_board.emoji} {default_board.name}**.\n"
+                    f"Привет, <b>{user.first_name}</b>! 👋 Я <b>PinTag</b>, и я готов помочь тебе победить хаос!\n\n"
+                    f"Я создал для тебя первую доску: <b>{default_board.emoji} {default_board.name}</b>.\n"
                     f"Отправь мне ссылку или файл, чтобы начать!"
                 )
             else:
-                greeting = f"С возвращением, {user.mention_markdown()}! Рад снова видеть тебя☺️"
+                greeting = f"С возвращением, <b>{user.first_name}</b>! Рад снова видеть тебя☺️"
 
-            await update.message.reply_text(greeting, parse_mode=ParseMode.MARKDOWN)
+            keyboard = [
+                [KeyboardButton("📋 Мои доски"), KeyboardButton("❓ Помощь")],
+                [KeyboardButton("📊 Статистика"), KeyboardButton("🚀 Начать")]
+            ]
+            reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+            await update.message.reply_text(greeting, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
             break
 
     except SQLAlchemyError as sqlex:
@@ -68,4 +73,11 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         "🔸 /renameboard <старое название> <новое название> [стикер] — Переименовать доску.\n"
         "🔸 /removeboard <название доски> — Удалить доску со всем её содержимым."
     )
-    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+
+    keyboard = [
+        [KeyboardButton("📋 Мои доски"), KeyboardButton("📊 Статистика")],
+        [KeyboardButton("🚀 Начать"), KeyboardButton("➕ Добавить элемент")]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)

@@ -1,12 +1,18 @@
 from sqlalchemy import func, select
-from database.database import Item
+from sqlalchemy.orm import selectinload
+
+from Database.database import Item
 
 
 async def find_item_by_title(db, user_id: int, title: str) -> Item:
+    from sqlalchemy.orm import selectinload
+
     result = await db.execute(
-        select(Item).filter(
+        select(Item)
+        .options(selectinload(Item.board))
+        .filter(
             Item.user_id == user_id,
-            Item.title == title
+            func.lower(Item.title) == func.lower(title)
         )
     )
     return result.scalar_one_or_none()
@@ -14,12 +20,15 @@ async def find_item_by_title(db, user_id: int, title: str) -> Item:
 
 async def find_item_by_id(db, user_id: int, item_id: int) -> Item:
     result = await db.execute(
-        select(Item).filter(
+        select(Item)
+        .options(selectinload(Item.board))  # Это ключевое!
+        .filter(
             Item.user_id == user_id,
             Item.id == item_id,
         )
     )
-    return result.scalar_one_or_none()
+    item = result.scalar_one_or_none()
+    return item
 
 
 async def find_items_by_keyword(db, user_id: int, keyword: str):
