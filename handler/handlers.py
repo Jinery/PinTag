@@ -38,6 +38,7 @@ async def start_command(update: Update, context: CallbackContext) -> None:
                 )
                 db.add(default_board)
                 await db.commit()
+                await db.refresh(default_board)
 
                 logger.info(f"Created new user: {user_id}")
                 greeting = (
@@ -55,8 +56,6 @@ async def start_command(update: Update, context: CallbackContext) -> None:
             reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
             await update.message.reply_text(greeting, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-            break
-
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error: {sqlex}")
         await update.message.reply_text("Ошибка в базе данных, попробуй позже.")
