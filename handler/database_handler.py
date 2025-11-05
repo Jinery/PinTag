@@ -104,7 +104,7 @@ async def boards_command(update: Update, context: CallbackContext) -> None:
 async def rename_board_command(update: Update, context: CallbackContext) -> None:
     if len(context.args) < 2:
         await update.message.reply_text(
-            "Используй: /renameboard старое_название новое_название [эмодзи]\n"
+            "Используй: /renameboard старое_название новое_название [эмодзи]\n")
         await update.message.reply_text(
             "Используй: /renameboard старое_название новое_название [эмодзи]\n"
             "Пример: /renameboard Стараядоска Новаядоска 🎯"
@@ -321,8 +321,7 @@ async def remove_board_command(update: Update, context: CallbackContext) -> None
         items = await get_all_items_by_board_id(user_id, board.id)
         items = await get_all_items_by_board_id(user_id, board.id)
         for item in items:
-            if item.content_type in ['photo', 'document', 'video'] and item.file_path:
-            if item.content_type in ['photo', 'document', 'video'] and item.file_path:
+            if item.content_type in ALL_FILE_TYPES and item.file_path:
                 try:
                     file_manager.delete_file(item.file_path)
                 except Exception as e:
@@ -625,7 +624,6 @@ async def inline_board_selection(update: Update, context: CallbackContext) -> in
         else:
             return SELECT_BOARD
 
-    except Exception:
     except Exception:
         await context.bot.send_message(
                 chat_id=update.effective_user.id,
