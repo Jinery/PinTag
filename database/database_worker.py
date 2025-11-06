@@ -6,7 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from database.database import get_db, Item, Board, UserConnection
-from utils.item_searcher import find_item_by_id, find_item_by_title, find_items_by_keyword
+from utils.item_searcher import find_item_by_id, find_item_by_title
 
 logger = logging.getLogger()
 

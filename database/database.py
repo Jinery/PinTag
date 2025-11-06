@@ -73,7 +73,6 @@ class UserConnection(Base):
     connect_id = Column(String(64), unique=True, nullable=False)
     client_name = Column(String(100), nullable=False)
     status = Column(String(20), default='pending')
-    access_token = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.now(datetime.timezone.utc))
     confirmed_at = Column(DateTime, nullable=True)
 

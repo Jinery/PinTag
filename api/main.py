@@ -61,6 +61,10 @@ class CreateItemRequest(BaseModel):
     content_data: Optional[str] = None
 
 
+class MoveItemRequest(BaseModel):
+    new_board_id: int
+
+
 @app.post("/users/{user_id}/generate-connect")
 async def generate_connect_id(
     user_id: int,
@@ -185,7 +189,7 @@ async def rename_board(user_id: int, board_id: int, new_board_name: str, new_boa
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/users/{user_id}/boards/{board_id}")
+@app.delete("/users/{user_id}/boards/{board_id}")
 async def remove_board(user_id: int, board_id: int, token: str = Depends(verify_token)):
     try:
         board = await get_board_by_id(user_id, board_id)
@@ -276,17 +280,19 @@ async def search_items(user_id: int, q: str, token: str = Depends(verify_token))
 
 
 @app.post("/users/{user_id}/items/{item_id}")
-async def move_item(user_id: int, item_id: int, new_board_id: int, token: str = Depends(verify_token)):
+async def move_item(user_id: int, item_id: int, request: MoveItemRequest, token: str = Depends(verify_token)):
     try:
+        new_board_id = request.new_board_id
         board = await get_board_by_id(user_id, new_board_id)
         if not board:
             raise HTTPException(status_code=404, detail="Доска не найдена")
 
         item = await get_item_by_id(user_id, item_id)
         if not item:
-            raise HTTPException(status_code=404, detail="лемент не найден")
+            raise HTTPException(status_code=404, detail="Элемент не найден")
 
         await database.database_worker.move_item(user_id, item_id, new_board_id)
+        return {"status": "success", "message": "Элемент перемещен"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -20,7 +20,12 @@ def build_bot_application(token: str) -> Application:
     # --- Conversation handler ---
     application.add_handler(ConversationHandler(
         entry_points=[
-            MessageHandler(filters.TEXT & ~filters.COMMAND, add_item_conservation),
+            MessageHandler(
+                (filters.TEXT & ~filters.COMMAND & ~filters.Text([
+                    "📋 Мои доски", "❓ Помощь", "📊 Статистика", "🚀 Начать"
+                ])),
+                add_item_conservation
+            ),
             MessageHandler(filters.PHOTO | filters.ATTACHMENT | filters.VIDEO, add_item_conservation)
         ],
         states={
@@ -46,6 +51,12 @@ def build_bot_application(token: str) -> Application:
     application.add_handler(CommandHandler("renameboard", rename_board_command))
     application.add_handler(CommandHandler("removeboard", remove_board_command))
     application.add_handler(CommandHandler("connections", list_connections_command))
+
+    # --- Message Handlers ---
+    application.add_handler(MessageHandler(filters.Text("📋 Мои доски"), boards_command))
+    application.add_handler(MessageHandler(filters.Text("❓ Помощь"), help_command))
+    application.add_handler(MessageHandler(filters.Text("📊 Статистика"), stats_command))
+    application.add_handler(MessageHandler(filters.Text("🚀 Начать"), start_command))
 
     # --- Callback Query Handlers ---
     application.add_handler(CallbackQueryHandler(
