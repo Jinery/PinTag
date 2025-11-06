@@ -110,7 +110,6 @@ async def rename_board_command(update: Update, context: CallbackContext) -> None
             "Пример: /renameboard Стараядоска Новаядоска 🎯"
         )
         return
-        return
 
     user_id = update.effective_user.id
     old_name = context.args[0]
@@ -626,9 +625,9 @@ async def inline_board_selection(update: Update, context: CallbackContext) -> in
 
     except Exception:
         await context.bot.send_message(
-                chat_id=update.effective_user.id,
-                text="❌ Произошла критическая ошибка. Попробуй еще раз."
-            )
+            chat_id=update.effective_user.id,
+            text="❌ Произошла критическая ошибка. Попробуй еще раз."
+        )
         return ConversationHandler.END
 
 
@@ -639,7 +638,7 @@ async def send_item_content(update: Update, context: CallbackContext, item: Item
 
     try:
         if update.callback_query:
-            chat_id = update.callback_query.message.chat_id
+            chat_id = update.callback_query.message.chat.id
             message_for_reply = None
         else:
             chat_id = update.effective_chat.id
@@ -712,10 +711,6 @@ async def send_item_content(update: Update, context: CallbackContext, item: Item
         logger.error(f"Error sending {item.content_type}: {e}")
         error_chat_id = update.effective_chat.id if update.effective_chat else update.callback_query.message.chat_id
         await context.bot.send_message(error_chat_id, f"❌ Ошибка при отправке {item.content_type}")
-
-    except Exception as e:
-        logger.error(f"Error sending {item.content_type}: {e}")
-        await update.message.reply_text(f"❌ Ошибка при отправке {item.content_type}")
 
 
 async def inline_item_selection(update: Update, context: CallbackContext):
@@ -750,7 +745,7 @@ async def send_item_content(update: Update, context: CallbackContext, item: Item
 
     try:
         if update.callback_query:
-            chat_id = update.callback_query.message.chat_id
+            chat_id = update.callback_query.message.chat.id
             message_for_reply = None
         else:
             chat_id = update.effective_chat.id
@@ -821,12 +816,8 @@ async def send_item_content(update: Update, context: CallbackContext, item: Item
         await send_message()
     except Exception as e:
         logger.error(f"Error sending {item.content_type}: {e}")
-        error_chat_id = update.effective_chat.id if update.effective_chat else update.callback_query.message.chat_id
+        error_chat_id = update.effective_chat.id if update.effective_chat else update.callback_query.message.chat.id
         await context.bot.send_message(error_chat_id, f"❌ Ошибка при отправке {item.content_type}")
-
-    except Exception as e:
-        logger.error(f"Error sending {item.content_type}: {e}")
-        await update.message.reply_text(f"❌ Ошибка при отправке {item.content_type}")
 
 
 async def inline_item_selection(update: Update, context: CallbackContext):
@@ -952,16 +943,6 @@ async def inline_board_item(update: Update, context: CallbackContext) -> None:
             await context.bot.send_message(
                 chat_id=query.from_user.id,
                 text="❌ Ошибка базы данных при удалении элемента."
-            )
-        except:
-            pass
-    except Exception as e:
-        logger.error(f"Unexpected error in inline_board_item: {e}")
-        try:
-            await query.delete_message()
-            await context.bot.send_message(
-                chat_id=query.from_user.id,
-                text="❌ Произошла непредвиденная ошибка при удалении."
             )
         except:
             pass
