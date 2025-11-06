@@ -7,9 +7,10 @@ from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 from telegram.ext import Application
 
+import database.database_worker
 from database.database_worker import get_all_user_boards, get_board_item_count, get_all_items_by_board_id, \
     get_board_by_id, get_all_items_by_keyword, create_user_connection, get_user_connections, create_new_item, \
-    get_item_by_id, remove_item_by_id, get_connection_by_id
+    get_item_by_id, remove_item_by_id, get_connection_by_id, get_board_by_name, update_board_name
 from handler.auth_handler import send_connection_request
 
 from .dependencies import verify_token
@@ -167,6 +168,34 @@ async def get_user_boards(user_id: int, token: str = Depends(verify_token)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/users/{user_id}/boards/{board_id}")
+async def rename_board(user_id: int, board_id: int, new_board_name: str, new_board_emoji: Optional[str],
+                       token: str = Depends(verify_token)):
+    try:
+        board = await get_board_by_id(user_id, board_id)
+        if not board:
+            raise HTTPException(status_code=404, detail="Доска не найдена")
+
+        existing_board = await get_board_by_name(user_id, new_board_name)
+        if existing_board:
+            raise HTTPException(status_code=409, detail="Доска с текущим названием уже существует")
+
+        await update_board_name(user_id, board_id, new_board_name, new_board_emoji)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/users/{user_id}/boards/{board_id}")
+async def remove_board(user_id: int, board_id: int, token: str = Depends(verify_token)):
+    try:
+        board = await get_board_by_id(user_id, board_id)
+        if not board:
+            raise HTTPException(status_code=404, detail="Доска не найдена")
+        await remove_board(user_id, board_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/users/{user_id}/boards/{board_id}/items", response_model=List[ItemOut])
 async def get_board_items(user_id: int, board_id: int, token: str = Depends(verify_token)):
     try:
@@ -242,6 +271,22 @@ async def search_items(user_id: int, q: str, token: str = Depends(verify_token))
 
         return result
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/users/{user_id}/items/{item_id}")
+async def move_item(user_id: int, item_id: int, new_board_id: int, token: str = Depends(verify_token)):
+    try:
+        board = await get_board_by_id(user_id, new_board_id)
+        if not board:
+            raise HTTPException(status_code=404, detail="Доска не найдена")
+
+        item = await get_item_by_id(user_id, item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="лемент не найден")
+
+        await database.database_worker.move_item(user_id, item_id, new_board_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

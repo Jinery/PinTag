@@ -67,6 +67,7 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         "**Команды:**\n"
         "🔸 /start — Приветствие и регистрация.\n"
         "🔸 /boards — Показать список твоих досок.\n"
+        "🔸 /getmyid — Получить свой user id(нужен для подключения через локальный клиент либо-же API).\n"
         "🔸 /createboard <название> <эмодзи> — Создать новую доску. *Пример: /createboard Python 🐍*\n"
         "🔸 /show <доска> — Показать элементы в доске.\n"
         "🔸 /view <название> — Получить сохраненный элемент.\n"
@@ -84,3 +85,9 @@ async def help_command(update: Update, context: CallbackContext) -> None:
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+
+
+async def get_my_id_command(update: Update, context: CallbackContext) -> None:
+    user_id = update.effective_user.id
+
+    await update.message.edit_text(f"Вот твой ID: {user_id}.\nМожешь использовать его для подключения в клиенте.")

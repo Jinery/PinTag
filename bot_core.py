@@ -3,7 +3,7 @@ import asyncio
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, CallbackQueryHandler
 from database.database import init_db
 from handler.auth_handler import handle_connection_approval, list_connections_command
-from handler.handlers import start_command, help_command
+from handler.handlers import start_command, help_command, get_my_id_command
 
 from handler.database_handler import (
     create_new_board_command, boards_command, cancel_add_item,
@@ -35,6 +35,7 @@ def build_bot_application(token: str) -> Application:
     # --- Command Handlers ---
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("getmyid", get_my_id_command))
     application.add_handler(CommandHandler("createboard", create_new_board_command))
     application.add_handler(CommandHandler("boards", boards_command))
     application.add_handler(CommandHandler("show", show_command))

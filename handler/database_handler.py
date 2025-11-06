@@ -48,7 +48,7 @@ def extract_content_info(message):
     return content_type, data, title
 
 
-async def send_board_selection(update: Update, context: CallbackContext) -> int:
+async def send_board_selection(update: Update, context: CallbackContext) -> int | None:
     try:
         user_id = update.effective_user.id
 
@@ -104,8 +104,6 @@ async def boards_command(update: Update, context: CallbackContext) -> None:
 async def rename_board_command(update: Update, context: CallbackContext) -> None:
     if len(context.args) < 2:
         await update.message.reply_text(
-            "Используй: /renameboard старое_название новое_название [эмодзи]\n")
-        await update.message.reply_text(
             "Используй: /renameboard старое_название новое_название [эмодзи]\n"
             "Пример: /renameboard Стараядоска Новаядоска 🎯"
         )
@@ -121,22 +119,16 @@ async def rename_board_command(update: Update, context: CallbackContext) -> None
 
         if not board:
             await update.message.reply_text(f"❌ Доска с названием '{old_name}' не найдена.")
-            await update.message.reply_text(f"❌ Доска с названием '{old_name}' не найдена.")
             return
 
         existing_board = await get_board_by_name(user_id, new_name)
 
         if existing_board and existing_board.id != board.id:
             await update.message.reply_text(f"❌ Доска с названием '{new_name}' уже существует.")
-            await update.message.reply_text(f"❌ Доска с названием '{new_name}' уже существует.")
             return
 
         old_name, old_emoji, new_name, final_emoji = await update_board_name(user_id, board.id, new_name, new_emoji)
-        old_name, old_emoji, new_name, final_emoji = await update_board_name(user_id, board.id, new_name, new_emoji)
 
-        await update.message.reply_text(
-            f"✅ Доска '{old_emoji} {old_name}' переименована в '{final_emoji} {new_name}'!"
-        )
         await update.message.reply_text(
             f"✅ Доска '{old_emoji} {old_name}' переименована в '{final_emoji} {new_name}'!"
         )
@@ -239,22 +231,13 @@ async def view_command(update: Update, context: CallbackContext) -> None:
 
             await update.message.reply_text(message, parse_mode=ParseMode.HTML,
                                             reply_markup=InlineKeyboardMarkup(keyboard))
-            item_list = "\n".join([f"• {item.title} (в доске {item.board.emoji} {item.board.name})" for item in items])
-            keyboard = [[InlineKeyboardButton(item.title, callback_data=f"select_item:{item.id}")] for item in items[:5]]
-            message = (f"Найдено <b>{len(items)}</b> совпадений для <b>'{item_title}'</b>:\n\n"
-                       f"{item_list}\n\nУточни название или выбери элемент:")
-
-            await update.message.reply_text(message, parse_mode=ParseMode.HTML,
-                                            reply_markup=InlineKeyboardMarkup(keyboard))
             return
 
         item = items[0]
         reply_markup = InlineKeyboardMarkup([
             [InlineKeyboardButton("🗑 Удалить", callback_data=f"remove_item:{item.id}")],
-            [InlineKeyboardButton("🗑 Удалить", callback_data=f"remove_item:{item.id}")],
         ])
 
-        await send_item_content(update, context, item, reply_markup)
         await send_item_content(update, context, item, reply_markup)
     except SQLAlchemyError as sqlex:
         logger.error(f"SQLAlchemy Error on /view command: {sqlex}")
@@ -284,7 +267,6 @@ async def remove_command(update: Update, context: CallbackContext) -> None:
                 logger.error(f"Error deleting file {item.file_path}: {e}")
 
         await remove_item_by_id(user_id, item.id)
-
         await update.message.reply_text(f"🗑️ Элемент <b>'{item_title}'</b> (из доски <b>{board_name}</b>) был успешно удален.",
                                         parse_mode=ParseMode.HTML)
     except SQLAlchemyError as sqlex:
@@ -305,7 +287,6 @@ async def remove_board_command(update: Update, context: CallbackContext) -> None
 
     board_name = " ".join(context.args)
 
-
     try:
         board = await get_board_by_name(user_id, board_name)
         if not board:
@@ -318,21 +299,19 @@ async def remove_board_command(update: Update, context: CallbackContext) -> None
             return
 
         items = await get_all_items_by_board_id(user_id, board.id)
-        items = await get_all_items_by_board_id(user_id, board.id)
         for item in items:
             if item.content_type in ALL_FILE_TYPES and item.file_path:
                 try:
                     file_manager.delete_file(item.file_path)
+                except FileNotFoundError:
+                    logger.warning(f"File not found: {item.file_path}")
                 except Exception as e:
-                    logger.warning(f"File not found: {item.file_path}")
-                    logger.warning(f"File not found: {item.file_path}")
+                    logger.error(f"Error on deleting file: {e}")
             await remove_item_by_id(user_id, item.id)
         await remove_board_by_id(user_id, board.id)
-
         await update.message.reply_text(f"🗑️ Доска <b>'{board_name}'</b> и все её элементы были успешно удалены.",
                                         parse_mode=ParseMode.HTML)
     except SQLAlchemyError as sqlex:
-        logger.error(f"SQLAlchemy Error on /removeboard command: {sqlex}")
         logger.error(f"SQLAlchemy Error on /removeboard command: {sqlex}")
         await update.message.reply_text("Произошла ошибка базы данных при удалении доски.")
     except ValueError as vex:
@@ -373,8 +352,6 @@ async def move_command(update: Update, context: CallbackContext) -> None:
             return
 
         await move_item(user_id, item.id, target_board.id)
-        await move_item(user_id, item.id, target_board.id)
-
         await update.message.reply_text(f"✅ Элемент <b>{item_title}</b> успешно перемещён из <b>{old_board_name}</b> в <b>{target_board_name}</b>",
                                         parse_mode=ParseMode.HTML)
 
@@ -432,7 +409,6 @@ async def add_item_conservation(update: Update, context: CallbackContext) -> int
     user_id = update.effective_user.id
 
     content_type, data, suggested_title = extract_content_info(message)
-    print(f"📨 Received: {content_type}, data: {data}")
 
     if not data:
         await update.message.reply_text("Отправь мне ссылку, файл или медиа-контент для сохранения.")
@@ -709,7 +685,7 @@ async def send_item_content(update: Update, context: CallbackContext, item: Item
         await send_message()
     except Exception as e:
         logger.error(f"Error sending {item.content_type}: {e}")
-        error_chat_id = update.effective_chat.id if update.effective_chat else update.callback_query.message.chat_id
+        error_chat_id = update.effective_chat.id if update.effective_chat else update.callback_query.message.chat.id
         await context.bot.send_message(error_chat_id, f"❌ Ошибка при отправке {item.content_type}")
 
 
@@ -847,11 +823,6 @@ async def inline_item_selection(update: Update, context: CallbackContext):
 
 async def inline_board_item(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    print(f"🔴 remove_item handler CALLED with data: {query.data}")
-
-    query = update.callback_query
-    print(f"🔴 remove_item handler CALLED with data: {query.data}")
-
     try:
         await query.answer()
 
@@ -860,9 +831,6 @@ async def inline_board_item(update: Update, context: CallbackContext) -> None:
 
         if action.startswith("remove_item:"):
             item_id = int(action.split(":")[1])
-            print(f"🗑️ Removing item: {item_id}")
-            print(f"🗑️ Removing item: {item_id}")
-
             item = await get_item_by_id(user_id, item_id)
 
             if not item:
@@ -872,18 +840,9 @@ async def inline_board_item(update: Update, context: CallbackContext) -> None:
                     text=f"❌ Элемент с id <b>{item_id}</b> не был найден.",
                     parse_mode='HTML'
                 )
-                await query.delete_message()
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=f"❌ Элемент с id <b>{item_id}</b> не был найден.",
-                    parse_mode='HTML'
-                )
                 return
 
             item_name = item.title
-
-            item_name = item.title
-
             if item.content_type in ALL_FILE_TYPES and item.file_path:
                 try:
                     file_manager.delete_file(item.file_path)
@@ -892,20 +851,6 @@ async def inline_board_item(update: Update, context: CallbackContext) -> None:
                     logger.error(f"Error deleting file {item.file_path}: {e}")
 
             await remove_item_by_id(user_id, item.id)
-            print(f"✅ Item {item_name}({item_id}) removed successfully")
-
-            try:
-                await query.delete_message()
-            except Exception as e:
-                logger.warning(f"Could not delete original message: {e}")
-
-            await context.bot.send_message(
-                chat_id=user_id,
-                text=f"✅ Элемент <b>{item_name}</b> успешно удалён.",
-                parse_mode='HTML'
-            )
-
-            print(f"✅ Item {item_name}({item_id}) removed successfully")
 
             try:
                 await query.delete_message()
@@ -938,15 +883,6 @@ async def inline_board_item(update: Update, context: CallbackContext) -> None:
             )
         except:
             pass
-        try:
-            await query.delete_message()
-            await context.bot.send_message(
-                chat_id=query.from_user.id,
-                text="❌ Ошибка базы данных при удалении элемента."
-            )
-        except:
-            pass
-
 
 async def cancel_add_item(update: Update, context: CallbackContext) -> int:
     if "temp_item" not in context.user_data:
