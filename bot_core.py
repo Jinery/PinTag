@@ -17,7 +17,7 @@ def build_bot_application(token: str) -> Application:
 
     application = Application.builder().token(token).build()
 
-    # --- Conversation Handler ---
+    # --- Conversation handler ---
     application.add_handler(ConversationHandler(
         entry_points=[
             MessageHandler(filters.TEXT & ~filters.COMMAND, add_item_conservation),
