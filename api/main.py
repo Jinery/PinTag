@@ -1,16 +1,20 @@
 import os
+from pathlib import Path
 from typing import Optional, List
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from telegram.ext import Application
 
 import database.database_worker
 from database.database_worker import get_all_user_boards, get_board_item_count, get_all_items_by_board_id, \
     get_board_by_id, get_all_items_by_keyword, create_user_connection, get_user_connections, create_new_item, \
     get_item_by_id, remove_item_by_id, get_connection_by_id, get_board_by_name, update_board_name
+from files.encryption_manager import encryption_manager
+from files.file_manager import file_manager
 from handler.auth_handler import send_connection_request
 
 from .dependencies import verify_token
@@ -46,6 +50,7 @@ class ItemOut(BaseModel):
     title: str
     content_type: str
     content_data: Optional[str]
+    file_path: Optional[str]
     created_at: str
     board_name: str
     board_emoji: str
@@ -213,6 +218,7 @@ async def get_board_items(user_id: int, board_id: int, token: str = Depends(veri
                 title=item.title,
                 content_type=item.content_type,
                 content_data=item.content_data,
+                file_path=item.file_path,
                 created_at=item.created_at.isoformat(),
                 board_name=board.name,
                 board_emoji=board.emoji
@@ -220,6 +226,44 @@ async def get_board_items(user_id: int, board_id: int, token: str = Depends(veri
 
         return result
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/files/{user_id}/{file_path:path}")
+async def get_file(user_id: int, file_path: str, token: str = Depends(verify_token)):
+    try:
+        file_data = file_manager.get_file(file_path)
+        decrypted_data = encryption_manager.decrypt_file(file_data)
+
+        # 3. Определяем MIME тип
+        file_ext = Path(file_path).suffix.lower()
+        mime_types = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.mp4': 'video/mp4',
+            '.mov': 'video/quicktime',
+            '.avi': 'video/x-msvideo',
+            '.pdf': 'application/pdf',
+            '.doc': 'application/msword',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.txt': 'text/plain',
+        }
+        mime_type = mime_types.get(file_ext, 'application/octet-stream')
+
+        return Response(
+            content=decrypted_data,
+            media_type=mime_type,
+            headers={
+                "Content-Disposition": "inline",
+                "Cache-Control": "max-age=3600"
+            }
+        )
+
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail="Файл не найден")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -268,6 +312,7 @@ async def search_items(user_id: int, q: str, token: str = Depends(verify_token))
                 title=item.title,
                 content_type=item.content_type,
                 content_data=item.content_data,
+                file_path=item.file_path,
                 created_at=item.created_at.isoformat(),
                 board_name=board.name,
                 board_emoji=board.emoji
