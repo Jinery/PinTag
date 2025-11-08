@@ -322,31 +322,37 @@ async def create_item(
 
 
 @app.post("/users/{user_id}/items/upload")
-async def upload_file(user_id: int, request: UploadFileRequest, token: str = Depends(verify_token)):
+async def upload_file(user_id: int,
+        board_id: int = Form(...),
+        title: str = Form(...),
+        content_type: str = Form(...),
+        content_data: str = Form(""),
+        file: UploadFile = File(...),
+        token: str = Depends(verify_token)):
     try:
-        board = await get_board_by_id(user_id, request.board_id)
+        board = await get_board_by_id(user_id, board_id)
         if not board:
             raise HTTPException(status_code=404, detail="Доска не найдена")
 
-        file = request.file
+        file = file
         file_data = await file.read()
-        original_filename = file.filename or f"{request.content_type}_{int(datetime.now().timestamp())}"
+        original_filename = f"{content_type}_{int(datetime.now().timestamp())}"
         file_extension = os.path.splitext(original_filename)[1]
 
         if not file_extension:
-            file_extension = '.jpg' if request.content_type == 'photo' \
-                else '.mp4' if request.content_type == 'video' else '.bin'
+            file_extension = '.jpg' if content_type == 'photo' \
+                else '.mp4' if content_type == 'video' else '.bin'
             original_filename += file_extension
 
         encrypted_data = encryption_manager.encrypt_file(file_data)
-        file_path = file_manager.save_file(encrypted_data, user_id, request.content_type + 's', original_filename)
+        file_path = file_manager.save_file(encrypted_data, user_id, content_type + "s", original_filename)
 
         new_item = await create_new_item(
             user_id=user_id,
-            board_id=request.board_id,
-            title=request.title,
-            content_type=request.content_type,
-            content_data=request.content_data,
+            board_id=board_id,
+            title=title,
+            content_type=content_type,
+            content_data=content_data,
             file_path = file_path,
             file_size = file_manager.get_file_size(file_path),
             encrypted=True
@@ -355,7 +361,7 @@ async def upload_file(user_id: int, request: UploadFileRequest, token: str = Dep
         return {
             "status": "success",
             "item_id": new_item.id,
-            "message": f"Элемент '{request.title}' создан",
+            "message": f"Элемент '{title}' создан",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
