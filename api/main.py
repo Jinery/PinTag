@@ -1,12 +1,15 @@
 import os
+import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, UploadFile, Form, File
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 from starlette.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
 from telegram.ext import Application
 
 import database.database_worker
@@ -64,6 +67,13 @@ class CreateItemRequest(BaseModel):
     title: str
     content_type: str
     content_data: Optional[str] = None
+
+
+class UploadFileRequest(BaseModel):
+    board_id: int
+    title: str
+    content_type: str
+    file: UploadFile = File(...)
 
 
 class MoveItemRequest(BaseModel):
@@ -236,7 +246,6 @@ async def get_file(user_id: int, file_path: str, token: str = Depends(verify_tok
         file_data = file_manager.get_file(file_path)
         decrypted_data = encryption_manager.decrypt_file(file_data)
 
-        # 3. Определяем MIME тип
         file_ext = Path(file_path).suffix.lower()
         mime_types = {
             '.jpg': 'image/jpeg',
@@ -253,14 +262,27 @@ async def get_file(user_id: int, file_path: str, token: str = Depends(verify_tok
         }
         mime_type = mime_types.get(file_ext, 'application/octet-stream')
 
-        return Response(
-            content=decrypted_data,
-            media_type=mime_type,
-            headers={
-                "Content-Disposition": "inline",
-                "Cache-Control": "max-age=3600"
-            }
-        )
+        if file_ext in ['.mp4', '.mov', '.avi']:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(decrypted_data)
+                tmp_path = tmp.name
+
+            return FileResponse(
+                path=tmp_path,
+                media_type=mime_type,
+                filename=Path(file_path).name,
+                background=BackgroundTask(os.unlink, tmp_path)
+            )
+
+        else:
+            return Response(
+                content=decrypted_data,
+                media_type=mime_type,
+                headers={
+                    "Content-Disposition": "inline",
+                    "Cache-Control": "max-age=3600"
+                }
+            )
 
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail="Файл не найден")
@@ -297,6 +319,47 @@ async def create_item(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/users/{user_id}/items/upload")
+async def upload_file(user_id: int, request: UploadFileRequest, token: str = Depends(verify_token)):
+    try:
+        board = await get_board_by_id(user_id, request.board_id)
+        if not board:
+            raise HTTPException(status_code=404, detail="Доска не найдена")
+
+        file = request.file
+        file_data = await file.read()
+        original_filename = file.filename or f"{request.content_type}_{int(datetime.now().timestamp())}"
+        file_extension = os.path.splitext(original_filename)[1]
+
+        if not file_extension:
+            file_extension = '.jpg' if request.content_type == 'photo' \
+                else '.mp4' if request.content_type == 'video' else '.bin'
+            original_filename += file_extension
+
+        encrypted_data = encryption_manager.encrypt_file(file_data)
+        file_path = file_manager.save_file(encrypted_data, user_id, request.content_type + 's', original_filename)
+
+        new_item = await create_new_item(
+            user_id=user_id,
+            board_id=request.board_id,
+            title=request.title,
+            content_type=request.content_type,
+            content_data=request.content_data,
+            file_path = file_path,
+            file_size = file_manager.get_file_size(file_path),
+            encrypted=True
+        )
+
+        return {
+            "status": "success",
+            "item_id": new_item.id,
+            "message": f"Элемент '{request.title}' создан",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/users/{user_id}/search", response_model=List[ItemOut])
