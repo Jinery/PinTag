@@ -15,7 +15,8 @@ from telegram.ext import Application
 import database.database_worker
 from database.database_worker import get_all_user_boards, get_board_item_count, get_all_items_by_board_id, \
     get_board_by_id, get_all_items_by_keyword, create_user_connection, get_user_connections, create_new_item, \
-    get_item_by_id, remove_item_by_id, get_connection_by_id, get_board_by_name, update_board_name
+    get_item_by_id, remove_item_by_id, get_connection_by_id, get_board_by_name, update_board_name, remove_board_by_id, \
+    create_new_board, get_item_by_title
 from files.encryption_manager import encryption_manager
 from files.file_manager import file_manager
 from handler.auth_handler import send_connection_request
@@ -62,11 +63,17 @@ class ItemOut(BaseModel):
 class ConnectionRequest(BaseModel):
     client_name: str
 
+
 class CreateItemRequest(BaseModel):
     board_id: int
     title: str
     content_type: str
     content_data: Optional[str] = None
+
+
+class CreateBoardRequest(BaseModel):
+    board_name: str
+    board_emoji: Optional[str] = "📁"
 
 
 class UploadFileRequest(BaseModel):
@@ -187,6 +194,19 @@ async def get_user_boards(user_id: int, token: str = Depends(verify_token)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/users/{user_id}/boards")
+async def create_board(user_id: int, request: CreateBoardRequest, token: str = Depends(verify_token)):
+    try:
+        existing_board = await get_board_by_name(user_id, request.board_name)
+        if existing_board:
+            raise HTTPException(status_code=409, detail="Доска с таким названием уже существует")
+
+        await create_new_board(user_id, request.board_name, request.board_emoji)
+        return {"status": "success", "message": "Доска успешно создана"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/users/{user_id}/boards/{board_id}")
 async def rename_board(user_id: int, board_id: int, new_board_name: str, new_board_emoji: Optional[str],
                        token: str = Depends(verify_token)):
@@ -200,6 +220,7 @@ async def rename_board(user_id: int, board_id: int, new_board_name: str, new_boa
             raise HTTPException(status_code=409, detail="Доска с текущим названием уже существует")
 
         await update_board_name(user_id, board_id, new_board_name, new_board_emoji)
+        return {"status": "success", "message": "Доска переименована"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -210,7 +231,9 @@ async def remove_board(user_id: int, board_id: int, token: str = Depends(verify_
         board = await get_board_by_id(user_id, board_id)
         if not board:
             raise HTTPException(status_code=404, detail="Доска не найдена")
-        await remove_board(user_id, board_id)
+        await remove_board_by_id(user_id, board_id)
+
+        return {"status": "success", "message": "Доска удалена"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -300,6 +323,10 @@ async def create_item(
         board = await get_board_by_id(user_id, request.board_id)
         if not board:
             raise HTTPException(status_code=404, detail="Доска не найдена")
+
+        existing_item = await get_item_by_title(user_id, request.title)
+        if existing_item:
+            raise HTTPException(status_code=409, detail="Файл с таким названием уже существует")
 
         new_item = await create_new_item(
             user_id=user_id,

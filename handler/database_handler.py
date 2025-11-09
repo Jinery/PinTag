@@ -92,7 +92,6 @@ async def boards_command(update: Update, context: CallbackContext) -> None:
                 f"📚 <b>Твои Доски:</b>\n\n"
                 f"{board_list}\n\n"
                 f"Чтобы создать новую доску, используй команду /createboard название эмодзи"
-                f"Чтобы создать новую доску, используй команду /createboard название эмодзи"
             )
 
         await update.message.reply_text(message, parse_mode=ParseMode.HTML)
