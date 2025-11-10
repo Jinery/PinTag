@@ -92,7 +92,6 @@ async def generate_connect_id(
     user_id: int,
     request: ConnectionRequest,
     background_tasks: BackgroundTasks,
-    token: str = Depends(verify_token),
 ):
     try:
         connection = await create_user_connection(user_id, request.client_name)
@@ -119,7 +118,7 @@ async def generate_connect_id(
 
 
 @app.get("/connections/{connect_id}/status")
-async def get_connection_status(connect_id: str, token: str = Depends(verify_token)):
+async def get_connection_status(connect_id: str):
     try:
         connection = await get_connection_by_id(connect_id)
 
